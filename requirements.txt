@@ -1,0 +1,42 @@
+# ── Core LLM ──────────────────────────────────────────────────────────────────
+anthropic>=0.40.0
+
+# ── Web / API ─────────────────────────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+jinja2>=3.1.4
+python-multipart>=0.0.12
+aiofiles>=24.1.0
+websockets>=13.1
+httpx>=0.28.0
+
+# ── gRPC ──────────────────────────────────────────────────────────────────────
+grpcio>=1.68.0
+grpcio-tools>=1.68.0
+protobuf>=5.28.0
+
+# ── Database (SQLite default → PostgreSQL portable) ───────────────────────────
+sqlalchemy[asyncio]>=2.0.36
+aiosqlite>=0.20.0
+asyncpg>=0.30.0            # for PostgreSQL; installed but unused by default
+alembic>=1.14.0
+
+# ── OpenTelemetry ─────────────────────────────────────────────────────────────
+opentelemetry-api>=1.29.0
+opentelemetry-sdk>=1.29.0
+opentelemetry-exporter-otlp-proto-grpc>=1.29.0
+opentelemetry-exporter-otlp-proto-http>=1.29.0
+
+# ── Config / Serialisation ────────────────────────────────────────────────────
+pyyaml>=6.0.2
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+
+# ── Performance ───────────────────────────────────────────────────────────────
+uvloop>=0.21.0             # faster asyncio event loop (Linux/macOS)
+cython>=3.0.0              # optional: compile hot-path servicer modules
+setuptools>=75.0           # needed for Cython ext build
+
+# ── CLI / DX ──────────────────────────────────────────────────────────────────
+rich>=13.9.0
+click>=8.1.8

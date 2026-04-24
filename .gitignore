@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+chibu.db
+chibu_registry.json
+agents/
+.env

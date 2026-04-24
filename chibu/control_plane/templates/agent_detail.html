@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ agent.name }} — Chibu</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#0d1117', 1: '#161b22', 2: '#21262d', 3: '#30363d' },
+            accent: { DEFAULT: '#7c3aed', light: '#a78bfa' },
+          },
+          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'monospace'] },
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #161b22; } ::-webkit-scrollbar-thumb { background: #30363d; }
+    .gradient-border { background: linear-gradient(135deg,#7c3aed22,#0d1117,#7c3aed11); border: 1px solid #7c3aed44; }
+    .status-pill-running  { background:#10b98122; color:#34d399; border:1px solid #10b98144; }
+    .status-pill-stopped  { background:#6b728022; color:#9ca3af; border:1px solid #6b728044; }
+    .status-pill-starting { background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b44; }
+    .status-pill-error    { background:#f4364122; color:#fb7185; border:1px solid #f4364144; }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .fade-in { animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+    #log-terminal { font-size: 10px; line-height: 1.5; }
+    #log-terminal .log-line:hover { background: #21262d; }
+    input { background:#161b22; border:1px solid #30363d; color:#e6edf3; }
+    input:focus { outline:none; border-color:#7c3aed; box-shadow:0 0 0 2px #7c3aed33; }
+    .tab-btn.active { color:#a78bfa; border-bottom:2px solid #7c3aed; }
+    .tab-panel { display: none; } .tab-panel.active { display: block; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+<!-- Nav -->
+<header class="border-b border-surface-3 bg-surface-1 px-6 py-3 flex items-center gap-3 sticky top-0 z-30">
+  <a href="/" class="text-surface-3 hover:text-white text-xs">← Control Plane</a>
+  <span class="text-surface-3">/</span>
+  <div class="w-5 h-5 rounded bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center text-white text-[10px] font-bold">χ</div>
+  <span class="text-sm font-bold text-white">{{ agent.name }}</span>
+  <span id="status-badge" class="status-pill-{{ agent.status }} text-[10px] px-2 py-0.5 rounded-full ml-1">
+    {% if agent.status == 'running' %}<span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>{% endif %}
+    {{ agent.status }}
+  </span>
+  <div class="ml-auto flex gap-2">
+    {% if agent.status == 'running' %}
+    <button onclick="stopAgent()" class="px-3 py-1.5 rounded-md bg-rose-900/30 text-rose-400 hover:bg-rose-900/50 text-xs border border-rose-900/50 transition-colors">Stop</button>
+    {% else %}
+    <button onclick="startAgent()" class="px-3 py-1.5 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 text-xs border border-emerald-900/50 transition-colors">Start</button>
+    {% endif %}
+  </div>
+</header>
+
+<div class="p-6 max-w-6xl mx-auto w-full fade-in">
+
+  <!-- Identity cards -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    {% for label, val, sub in [
+      ("Agent ID",   agent.agent_id[:8]+'…', agent.agent_id),
+      ("Group",      agent.group.name if agent.group else '—', ''),
+      ("gRPC Port", ':' ~ agent.grpc_port, '127.0.0.1:' ~ agent.grpc_port),
+      ("PID",        agent.pid if agent.pid else '—', ''),
+    ] %}
+    <div class="gradient-border rounded-xl p-4">
+      <p class="text-[10px] uppercase tracking-widest text-surface-3 mb-1">{{ label }}</p>
+      <p class="text-sm font-bold text-white truncate font-mono" title="{{ sub }}">{{ val }}</p>
+      {% if sub %}<p class="text-[10px] text-surface-3 mt-0.5 truncate">{{ sub }}</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Auth token -->
+  <div class="gradient-border rounded-xl p-4 mb-6 flex items-center gap-3">
+    <div class="flex-1">
+      <p class="text-[10px] uppercase tracking-widest text-surface-3 mb-1">Auth Token</p>
+      <div class="flex items-center gap-2">
+        <code id="token-display" class="text-xs font-mono text-accent-light">{{ auth_token_masked }}</code>
+        <button onclick="revealToken()" class="text-[10px] text-surface-3 hover:text-white px-2 py-0.5 rounded bg-surface-2 transition-colors" id="reveal-btn">Show</button>
+        <button onclick="copyToken()" class="text-[10px] text-surface-3 hover:text-accent-light px-2 py-0.5 rounded bg-surface-2 transition-colors">Copy</button>
+      </div>
+    </div>
+    <div class="text-surface-3 text-xs">
+      <p>Connect with:</p>
+      <code class="text-[10px] text-accent-light">chibu client connect --token &lt;token&gt; --port {{ agent.grpc_port }}</code>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="border-b border-surface-3 mb-4 flex gap-4">
+    {% for tab_id, label in [('skills','Skills'), ('logs','Live Logs'), ('models','Models')] %}
+    <button class="tab-btn text-xs py-2 text-surface-3 hover:text-white transition-colors {% if loop.first %}active{% endif %}"
+            onclick="switchTab('{{ tab_id }}')">{{ label }}</button>
+    {% endfor %}
+  </div>
+
+  <!-- Skills tab -->
+  <div id="tab-skills" class="tab-panel active fade-in">
+    <div class="gradient-border rounded-xl overflow-hidden">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="border-b border-surface-3 text-[10px] uppercase tracking-widest text-surface-3">
+            <th class="text-left px-4 py-2.5">Skill</th>
+            <th class="text-left px-4 py-2.5">File</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for skill in skills %}
+          <tr class="border-b border-surface-3/50 hover:bg-surface-2/50 transition-colors">
+            <td class="px-4 py-2.5 font-bold text-accent-light">{{ skill.name }}</td>
+            <td class="px-4 py-2.5 text-surface-3 font-mono">{{ skill.file }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="px-4 py-6 text-center text-surface-3">No skills loaded</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Logs tab -->
+  <div id="tab-logs" class="tab-panel fade-in">
+    <div class="gradient-border rounded-xl overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-2 border-b border-surface-3">
+        <p class="text-[10px] uppercase tracking-widest text-surface-3">Live Log Stream</p>
+        <div class="flex items-center gap-1.5">
+          <span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span class="text-[10px] text-emerald-400">streaming</span>
+        </div>
+      </div>
+      <div id="log-terminal" class="bg-surface-1 p-4 h-96 overflow-y-auto" id="log-output">
+        <p class="text-surface-3">Connecting to log stream…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Models tab -->
+  <div id="tab-models" class="tab-panel fade-in">
+    <div id="models-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="gradient-border rounded-xl p-6 text-center text-surface-3 text-xs col-span-2">Loading models…</div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-xs font-medium shadow-lg border fade-in"></div>
+<script src="/static/main.js"></script>
+<script>
+  const AGENT_ID = "{{ agent.agent_id }}";
+  const FULL_TOKEN = "{{ agent.auth_token }}";
+
+  // ── Tabs ────────────────────────────────────────────────────────────────────
+  function switchTab(id) {
+    document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', b.textContent.toLowerCase().includes(id.toLowerCase().slice(0,3))));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + id));
+  }
+
+  // ── Token reveal ────────────────────────────────────────────────────────────
+  let tokenRevealed = false;
+  function revealToken() {
+    tokenRevealed = !tokenRevealed;
+    document.getElementById('token-display').textContent = tokenRevealed ? FULL_TOKEN : FULL_TOKEN.slice(0,8) + '•'.repeat(32);
+    document.getElementById('reveal-btn').textContent = tokenRevealed ? 'Hide' : 'Show';
+  }
+  function copyToken() {
+    navigator.clipboard.writeText(FULL_TOKEN).then(() => showToast('Token copied!', 'success'));
+  }
+
+  // ── Agent lifecycle ─────────────────────────────────────────────────────────
+  async function startAgent() {
+    const r = await fetch(`/agents/${AGENT_ID}/start`, { method: 'POST' });
+    const d = await r.json();
+    showToast(r.ok ? `Agent starting… (pid ${d.pid})` : d.detail, r.ok ? 'success' : 'error');
+    if (r.ok) setTimeout(() => location.reload(), 2000);
+  }
+  async function stopAgent() {
+    const r = await fetch(`/agents/${AGENT_ID}/stop`, { method: 'POST' });
+    showToast(r.ok ? 'Agent stopped' : (await r.json()).detail, r.ok ? 'info' : 'error');
+    if (r.ok) setTimeout(() => location.reload(), 500);
+  }
+
+  // ── Log streaming (WebSocket) ───────────────────────────────────────────────
+  function initLogStream() {
+    const out = document.getElementById('log-terminal');
+    const host = location.host;
+    const ws = new WebSocket(`ws://${host}/ws/${AGENT_ID}/logs`);
+    ws.onopen = () => { out.innerHTML = ''; };
+    ws.onmessage = e => {
+      const line = document.createElement('div');
+      line.className = 'log-line px-1 py-0.5 rounded';
+      line.style.color = e.data.includes('ERROR') ? '#fb7185' : e.data.includes('WARN') ? '#fbbf24' : '#9ca3af';
+      line.textContent = e.data;
+      out.appendChild(line);
+      out.scrollTop = out.scrollHeight;
+    };
+    ws.onclose = () => setTimeout(initLogStream, 3000);
+  }
+  initLogStream();
+
+  // ── Models ──────────────────────────────────────────────────────────────────
+  fetch(`/agents/${AGENT_ID}/status`).then(r => r.json()).then(() => {
+    // Models are read from models.json via the skills endpoint; render statically
+    const models = [
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', ctx: '200K', isDefault: true },
+      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', ctx: '200K', isDefault: false },
+    ];
+    document.getElementById('models-container').innerHTML = models.map(m => `
+      <div class="gradient-border rounded-xl p-4 ${m.isDefault ? 'shadow-glow-accent' : ''}">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-sm font-bold text-white">${m.name}</p>
+          ${m.isDefault ? '<span class="text-[10px] bg-violet-900/50 text-accent-light px-2 py-0.5 rounded-full border border-violet-800">default</span>' : ''}
+        </div>
+        <p class="text-[10px] font-mono text-surface-3">${m.id}</p>
+        <p class="text-xs text-surface-3 mt-2">Context: ${m.ctx} tokens</p>
+      </div>
+    `).join('');
+  });
+</script>
+</body>
+</html>

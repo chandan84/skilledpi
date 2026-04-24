@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chibu — Control Plane</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#0d1117', 1: '#161b22', 2: '#21262d', 3: '#30363d' },
+            accent:  { DEFAULT: '#7c3aed', light: '#a78bfa', glow: '#7c3aed33' },
+            emerald: { glow: '#10b98133' },
+            rose:    { glow: '#f4364133' },
+          },
+          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'monospace'] },
+          boxShadow: {
+            'glow-accent': '0 0 20px 2px #7c3aed33',
+            'glow-emerald': '0 0 16px 2px #10b98133',
+            'glow-rose': '0 0 16px 2px #f4364133',
+          },
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: #161b22; }
+    ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+    .gradient-border { background: linear-gradient(135deg, #7c3aed22, #0d1117, #7c3aed11); border: 1px solid #7c3aed44; }
+    .status-pill-running  { background: #10b98122; color: #34d399; border: 1px solid #10b98144; }
+    .status-pill-stopped  { background: #6b728022; color: #9ca3af; border: 1px solid #6b728044; }
+    .status-pill-starting { background: #f59e0b22; color: #fbbf24; border: 1px solid #f59e0b44; }
+    .status-pill-error    { background: #f4364122; color: #fb7185; border: 1px solid #f4364144; }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    @keyframes pulse-dot { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+    .fade-in { animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    .glow-hover { transition: box-shadow .2s, border-color .2s; }
+    .glow-hover:hover { box-shadow: 0 0 20px 2px #7c3aed33; border-color: #7c3aed88 !important; }
+    .modal-backdrop { backdrop-filter: blur(6px); background: #0d111799; }
+    input, select { background: #161b22; border: 1px solid #30363d; color: #e6edf3; }
+    input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 2px #7c3aed33; }
+    .sidebar-link.active { background: #7c3aed22; border-left: 2px solid #7c3aed; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+<!-- ── Top Nav ────────────────────────────────────────────────────────────── -->
+<header class="border-b border-surface-3 bg-surface-1 px-6 py-3 flex items-center justify-between sticky top-0 z-30">
+  <div class="flex items-center gap-3">
+    <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center shadow-glow-accent">
+      <span class="text-white text-xs font-bold">χ</span>
+    </div>
+    <span class="text-sm font-bold tracking-widest text-accent-light uppercase">chibu</span>
+    <span class="text-xs text-surface-3 ml-1">control plane</span>
+  </div>
+  <div class="flex items-center gap-4">
+    <div id="summary-pills" class="flex gap-3 text-xs">
+      <span class="px-2 py-1 rounded-md status-pill-running" id="pill-running">
+        <span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>
+        <span id="running-count">{{ summary.running_agents }}</span> running
+      </span>
+      <span class="px-2 py-1 rounded-md status-pill-stopped">
+        <span id="stopped-count">{{ summary.stopped_agents }}</span> stopped
+      </span>
+    </div>
+    <button onclick="openCreateModal()" class="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:bg-violet-500 transition-colors shadow-glow-accent">
+      + New Agent
+    </button>
+  </div>
+</header>
+
+<!-- ── Layout ─────────────────────────────────────────────────────────────── -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- Sidebar -->
+  <aside class="w-56 border-r border-surface-3 bg-surface-1 flex flex-col py-4 shrink-0 overflow-y-auto">
+    <div class="px-4 mb-3">
+      <p class="text-[10px] uppercase tracking-widest text-surface-3 font-bold mb-2">Agent Groups</p>
+    </div>
+
+    <nav class="flex flex-col gap-0.5 px-2">
+      <a href="/" class="sidebar-link active text-xs px-3 py-2 rounded-md flex items-center gap-2 cursor-pointer hover:bg-surface-2 transition-colors" id="link-all">
+        <span class="text-accent-light">⊞</span> All Agents
+        <span class="ml-auto text-[10px] bg-surface-3 px-1.5 py-0.5 rounded">{{ summary.total_agents }}</span>
+      </a>
+      {% for group in groups %}
+      <a href="/?group={{ group.id }}" class="sidebar-link text-xs px-3 py-2 rounded-md flex items-center gap-2 cursor-pointer hover:bg-surface-2 transition-colors">
+        <span class="text-violet-400">◈</span>
+        <span class="truncate">{{ group.name }}</span>
+        <span class="ml-auto text-[10px] bg-surface-3 px-1.5 py-0.5 rounded">{{ group.agent_count }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    <div class="mt-auto px-4 pt-4 border-t border-surface-3 mt-4">
+      <p class="text-[10px] uppercase tracking-widest text-surface-3 font-bold mb-2">Quick Links</p>
+      <a href="/api/docs" target="_blank" class="text-xs text-surface-3 hover:text-accent-light flex items-center gap-1.5 py-1">
+        <span>⟡</span> API Docs
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="flex-1 overflow-y-auto">
+    <div class="p-6 max-w-none">
+
+      <!-- Summary cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {% set cards = [
+          ("Total Agents", summary.total_agents, "◈", "text-accent-light"),
+          ("Running",       summary.running_agents, "▶", "text-emerald-400"),
+          ("Stopped",       summary.stopped_agents, "◼", "text-gray-400"),
+          ("Groups",        summary.total_groups,   "⊞", "text-violet-300"),
+        ] %}
+        {% for label, val, icon, color in cards %}
+        <div class="gradient-border rounded-xl p-4 glow-hover fade-in">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-[10px] uppercase tracking-widest text-surface-3 mb-1">{{ label }}</p>
+              <p class="text-2xl font-bold text-white">{{ val }}</p>
+            </div>
+            <span class="text-xl {{ color }}">{{ icon }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Charts row -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div class="lg:col-span-2 gradient-border rounded-xl p-4">
+          <p class="text-xs text-surface-3 uppercase tracking-widest mb-3">LLM Requests (24h)</p>
+          <canvas id="chart-llm" height="110"></canvas>
+        </div>
+        <div class="gradient-border rounded-xl p-4">
+          <p class="text-xs text-surface-3 uppercase tracking-widest mb-3">Agent Status</p>
+          <canvas id="chart-status" height="110"></canvas>
+        </div>
+      </div>
+
+      <!-- Agents grid -->
+      <div class="mb-3 flex items-center justify-between">
+        <p class="text-[10px] uppercase tracking-widest text-surface-3 font-bold">Agents</p>
+        <input id="agent-search" onkeyup="filterAgents()" placeholder="Search agents…"
+               class="text-xs px-3 py-1.5 rounded-md w-48" />
+      </div>
+
+      <div id="agents-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {% for agent in agents %}
+        <div class="agent-card gradient-border rounded-xl p-4 glow-hover fade-in" data-name="{{ agent.name|lower }}" data-group="{{ agent.group.name|lower if agent.group else '' }}">
+          <div class="flex items-start justify-between mb-3">
+            <div>
+              <p class="font-bold text-sm text-white">{{ agent.name }}</p>
+              <p class="text-[10px] text-surface-3 mt-0.5">{{ agent.group.name if agent.group else '—' }}</p>
+            </div>
+            <span class="status-pill-{{ agent.status }} text-[10px] px-2 py-0.5 rounded-full">
+              {% if agent.status == 'running' %}<span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>{% endif %}
+              {{ agent.status }}
+            </span>
+          </div>
+
+          <div class="flex items-center gap-2 text-[10px] text-surface-3 mb-3">
+            <span class="font-mono bg-surface-2 px-1.5 py-0.5 rounded">gRPC :{{ agent.grpc_port }}</span>
+            <span class="font-mono bg-surface-2 px-1.5 py-0.5 rounded truncate max-w-[120px]" title="{{ agent.auth_token }}">
+              {{ agent.auth_token[:8] }}•••
+            </span>
+            <button onclick="copyToken('{{ agent.auth_token }}')" class="ml-auto text-accent-light hover:text-accent transition-colors">⎘</button>
+          </div>
+
+          <div class="flex gap-2">
+            <a href="/agents/{{ agent.agent_id }}" class="flex-1 text-center text-[10px] py-1.5 rounded-md bg-surface-2 hover:bg-surface-3 transition-colors">Details</a>
+            {% if agent.status == 'running' %}
+            <button onclick="stopAgent('{{ agent.agent_id }}', this)" class="flex-1 text-[10px] py-1.5 rounded-md bg-rose-900/30 text-rose-400 hover:bg-rose-900/50 transition-colors border border-rose-900/50">Stop</button>
+            {% else %}
+            <button onclick="startAgent('{{ agent.agent_id }}', this)" class="flex-1 text-[10px] py-1.5 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 transition-colors border border-emerald-900/50">Start</button>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <div class="col-span-3 text-center py-16 text-surface-3">
+          <p class="text-2xl mb-2">◈</p>
+          <p class="text-sm">No agents yet.</p>
+          <button onclick="openCreateModal()" class="mt-3 text-xs text-accent-light hover:underline">Create your first agent →</button>
+        </div>
+        {% endfor %}
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- ── Create Agent Modal ─────────────────────────────────────────────────── -->
+<div id="create-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop" onclick="closeCreateModal(event)">
+  <div class="gradient-border rounded-2xl p-6 w-full max-w-md mx-4 shadow-glow-accent" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="text-sm font-bold text-white">Create Pi Agent</h2>
+      <button onclick="closeCreateModal()" class="text-surface-3 hover:text-white text-lg">✕</button>
+    </div>
+    <form id="create-form" onsubmit="submitCreate(event)">
+      <div class="mb-4">
+        <label class="block text-[10px] uppercase tracking-widest text-surface-3 mb-1.5">Agent Name</label>
+        <input name="name" required class="w-full text-sm px-3 py-2 rounded-lg" placeholder="my-pi-agent" />
+      </div>
+      <div class="mb-4">
+        <label class="block text-[10px] uppercase tracking-widest text-surface-3 mb-1.5">Agent Group</label>
+        <input name="agent_group" required class="w-full text-sm px-3 py-2 rounded-lg" placeholder="badmono org" value="badmono org" />
+      </div>
+      <div class="mb-5">
+        <label class="block text-[10px] uppercase tracking-widest text-surface-3 mb-1.5">gRPC Port <span class="text-surface-3 normal-case">(leave blank to auto-assign)</span></label>
+        <input name="grpc_port" type="number" class="w-full text-sm px-3 py-2 rounded-lg" placeholder="auto" />
+      </div>
+      <div class="flex gap-3">
+        <button type="button" onclick="closeCreateModal()" class="flex-1 py-2 rounded-lg bg-surface-2 text-xs hover:bg-surface-3 transition-colors">Cancel</button>
+        <button type="submit" id="create-btn" class="flex-1 py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-violet-500 transition-colors">Create Agent</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-xs font-medium shadow-lg border fade-in"></div>
+
+<script src="/static/main.js"></script>
+<script>
+  // ── Charts ─────────────────────────────────────────────────────────────────
+  fetch('/api/analytics').then(r => r.json()).then(data => {
+    const accent = '#7c3aed', emerald = '#10b981', rose = '#f43641';
+
+    // LLM requests chart
+    new Chart(document.getElementById('chart-llm'), {
+      type: 'line',
+      data: {
+        labels: data.llm_hourly.map(d => d.hour.slice(11, 16)),
+        datasets: [{
+          label: 'Requests',
+          data: data.llm_hourly.map(d => d.count),
+          borderColor: accent, backgroundColor: accent + '22',
+          borderWidth: 1.5, fill: true, tension: 0.4,
+          pointRadius: 2, pointHoverRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: '#21262d' }, ticks: { color: '#6e7681', font: { size: 9 } } },
+          y: { grid: { color: '#21262d' }, ticks: { color: '#6e7681', font: { size: 9 } }, beginAtZero: true },
+        }
+      }
+    });
+
+    // Status doughnut
+    const sd = data.status_distribution;
+    const labels = Object.keys(sd), vals = Object.values(sd);
+    const colors = labels.map(l => l === 'running' ? emerald : l === 'error' ? rose : '#6b7280');
+    new Chart(document.getElementById('chart-status'), {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: vals, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '70%',
+        plugins: { legend: { position: 'bottom', labels: { color: '#9ca3af', font: { size: 9 }, boxWidth: 8 } } }
+      }
+    });
+  }).catch(() => {});
+</script>
+</body>
+</html>

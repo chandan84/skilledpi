@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "chibu"
+version = "0.1.0"
+description = "Chibu — Pi Agent Platform by badmono org"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[project.scripts]
+chibu = "chibu.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["chibu*"]
