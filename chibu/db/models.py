@@ -59,14 +59,14 @@ class Agent(Base):
     agent_id: Mapped[str] = mapped_column(String(240), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     group_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agent_groups.id"), nullable=False
+        String(36), ForeignKey("agent_groups.id"), nullable=False, index=True
     )
     auth_token: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
     grpc_port: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
     # workspace_path is the directory where pi --mode rpc runs (.pi/ lives here)
     workspace_path: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(
-        String(20), default="stopped"
+        String(20), default="stopped", index=True
     )  # stopped | starting | running | error
     pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

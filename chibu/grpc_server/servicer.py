@@ -29,7 +29,6 @@ def build_servicer(agent):
         async def Execute(self, request, context):
             if not agent.verify_token(request.auth_token):
                 await context.abort(16, "Invalid auth token")
-                return
 
             model = request.model or "faah"
             session_id = request.session_id or agent._current_session_id
@@ -73,7 +72,6 @@ def build_servicer(agent):
         async def GetInfo(self, request, context):
             if not agent.verify_token(request.auth_token):
                 await context.abort(16, "Invalid auth token")
-                return
 
             info = agent.info()
             return chibu_agent_pb2.InfoResponse(
@@ -91,7 +89,6 @@ def build_servicer(agent):
         async def ListSkills(self, request, context):
             if not agent.verify_token(request.auth_token):
                 await context.abort(16, "Invalid auth token")
-                return
 
             skills = agent.list_skills()
             return chibu_agent_pb2.ListSkillsResponse(
@@ -110,7 +107,6 @@ def build_servicer(agent):
         async def Reload(self, request, context):
             if not agent.verify_token(request.auth_token):
                 await context.abort(16, "Invalid auth token")
-                return
 
             try:
                 await agent.restart()

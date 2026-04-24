@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Sequence
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -91,22 +92,32 @@ class AgentRegistry:
         description: str = "",
     ) -> Agent:
         group = await self.get_or_create_group(group_name, description)
-        port = grpc_port or await self._next_port()
 
         # Composite human-readable ID
         agent_id = f"{_slug(group_name)}_{_slug(name)}"
 
-        agent = Agent(
-            agent_id=agent_id,
-            name=name,
-            group_id=group.id,
-            auth_token=generate_token(),
-            grpc_port=port,
-            workspace_path=workspace_path,
-            status="stopped",
-        )
-        self._s.add(agent)
-        await self._s.flush()
+        # Retry port allocation on collision (concurrent creates can race)
+        for _attempt in range(10):
+            port = grpc_port or await self._next_port()
+            agent = Agent(
+                agent_id=agent_id,
+                name=name,
+                group_id=group.id,
+                auth_token=generate_token(),
+                grpc_port=port,
+                workspace_path=workspace_path,
+                status="stopped",
+            )
+            self._s.add(agent)
+            try:
+                await self._s.flush()
+                break
+            except IntegrityError:
+                await self._s.rollback()
+                grpc_port = None  # let _next_port() try again
+        else:
+            raise RuntimeError("Could not allocate a unique gRPC port after 10 attempts")
+
         await self._record_event(agent_id, "agent_created", {"name": name, "chiboo": group_name})
         return await self.get_agent(agent_id)
 
@@ -155,12 +166,13 @@ class AgentRegistry:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _next_port(self) -> int:
-        result = await self._s.execute(select(func.max(Agent.grpc_port)))
-        max_port = result.scalar_one_or_none()
-        next_port = (max_port or _PORT_START - 1) + 1
-        if next_port > _PORT_END:
-            raise RuntimeError("gRPC port range exhausted")
-        return next_port
+        """Return the lowest port in [_PORT_START, _PORT_END] not currently assigned."""
+        result = await self._s.execute(select(Agent.grpc_port))
+        used = set(result.scalars().all())
+        for port in range(_PORT_START, _PORT_END + 1):
+            if port not in used:
+                return port
+        raise RuntimeError("gRPC port range exhausted")
 
     async def _record_event(self, agent_id: str, event_type: str, payload: dict) -> None:
         self._s.add(AgentEvent(agent_id=agent_id, event_type=event_type, payload=payload))

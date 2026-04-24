@@ -14,6 +14,7 @@ import os
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("chibu.process.manager")
 
@@ -27,6 +28,7 @@ class AgentProcessManager:
         self.agents_dir = agents_dir
         self.registry_snapshot = registry_snapshot_path
         self._procs: dict[str, asyncio.subprocess.Process] = {}
+        self._log_fhs: dict[str, Any] = {}
 
     # ── start ─────────────────────────────────────────────────────────────────
 
@@ -37,6 +39,7 @@ class AgentProcessManager:
         log_path = Path(agent_record["workspace_path"]) / "agent.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fh = open(log_path, "a")  # noqa: SIM115
+        self._log_fhs[agent_id] = log_fh
 
         cmd = [
             sys.executable, "-m", "chibu.grpc_server.server",
@@ -56,20 +59,24 @@ class AgentProcessManager:
         self._procs[agent_id] = proc
         logger.info("Spawned agent %s pid=%d port=%d", agent_record["name"], proc.pid, port)
 
-        asyncio.create_task(
-            self._wait_ready(agent_id, port, proc),
-            name=f"ready-{agent_id}",
-        )
+        ready = await self._wait_ready(agent_id, port, proc)
+        if not ready:
+            logger.warning("Agent %s failed readiness check", agent_id)
 
         return proc.pid
 
     # ── stop ──────────────────────────────────────────────────────────────────
 
     async def stop(self, agent_id: str, pid: int | None = None) -> None:
+        fh = self._log_fhs.pop(agent_id, None)
         proc = self._procs.pop(agent_id, None)
         if proc is not None:
             await self._terminate(proc)
+            if fh is not None:
+                fh.close()
             return
+        if fh is not None:
+            fh.close()
 
         if pid:
             try:
@@ -118,7 +125,9 @@ class AgentProcessManager:
 
     def write_registry_snapshot(self, agents: list[dict]) -> None:
         self.registry_snapshot.parent.mkdir(parents=True, exist_ok=True)
-        self.registry_snapshot.write_text(json.dumps({"agents": agents}, indent=2))
+        tmp = self.registry_snapshot.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"agents": agents}, indent=2))
+        tmp.replace(self.registry_snapshot)  # atomic on POSIX
 
     def is_running(self, agent_id: str) -> bool:
         proc = self._procs.get(agent_id)

@@ -79,6 +79,7 @@ async def delete_agent(
         raise HTTPException(409, "Stop the agent before deleting it")
 
     await registry.delete_agent(agent_id)
+    _flush_snapshot(pm, registry)
     return {"ok": True}
 
 
@@ -100,8 +101,13 @@ async def start_agent(
     _flush_snapshot(pm, registry)
 
     pid = await pm.start(_agent_record(agent))
-    await registry.update_status(agent_id, "running", pid=pid)
-    return {"status": "running", "pid": pid}
+    # pm.start() awaits _wait_ready(); only set running if process is still alive
+    if pm.is_running(agent_id):
+        await registry.update_status(agent_id, "running", pid=pid)
+        return {"status": "running", "pid": pid}
+    else:
+        await registry.update_status(agent_id, "error", pid=pid)
+        return {"status": "error", "pid": pid}
 
 
 @router.post("/{agent_id}/stop")

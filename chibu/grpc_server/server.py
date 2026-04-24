@@ -121,6 +121,16 @@ async def serve(
     logger.info("Stopping agent '%s' …", agent_rec["name"])
     await agent.stop()
     await server.stop(grace=3)
+
+    # Flush any buffered OTEL spans/metrics before the process exits
+    try:
+        from opentelemetry import trace
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "force_flush"):
+            provider.force_flush(timeout_millis=3000)
+    except Exception:  # noqa: BLE001
+        pass
+
     logger.info("Agent '%s' shut down cleanly", agent_rec["name"])
 
 
