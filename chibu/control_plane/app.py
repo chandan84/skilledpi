@@ -41,6 +41,29 @@ async def lifespan(app: FastAPI):
 
     logger.info("Initialising database …")
     await init_db()
+
+    # Reconcile in-memory process state with DB after a restart.
+    # Agents the DB believes are "running" either still have a live PID
+    # (we track them as orphans) or their process died (mark stopped).
+    from chibu.control_plane.deps import get_process_manager
+    from chibu.db.engine import get_session_factory
+    from chibu.registry.agent_registry import AgentRegistry
+
+    pm = get_process_manager()
+    factory = get_session_factory()
+    async with factory() as session:
+        registry = AgentRegistry(session)
+        running = await registry.list_agents()
+        running_records = [
+            {"agent_id": a.agent_id, "pid": a.pid, "status": a.status}
+            for a in running
+            if a.status == "running"
+        ]
+        stale_ids = await pm.recover_running_agents(running_records)
+        for agent_id in stale_ids:
+            await registry.update_status(agent_id, "stopped", pid=None)
+        await session.commit()
+
     logger.info("Control plane ready")
     yield
     logger.info("Control plane shutting down …")

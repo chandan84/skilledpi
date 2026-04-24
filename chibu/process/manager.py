@@ -23,12 +23,23 @@ _READY_TIMEOUT = 30.0
 _STOP_GRACE = 5.0
 
 
+def _pid_alive(pid: int) -> bool:
+    """Return True if the OS process with *pid* is still running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
 class AgentProcessManager:
     def __init__(self, agents_dir: Path, registry_snapshot_path: Path) -> None:
         self.agents_dir = agents_dir
         self.registry_snapshot = registry_snapshot_path
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._log_fhs: dict[str, Any] = {}
+        # PIDs of agents that were running before our last restart (orphan tracking)
+        self._orphan_pids: dict[str, int] = {}
 
     # ── start ─────────────────────────────────────────────────────────────────
 
@@ -65,25 +76,58 @@ class AgentProcessManager:
 
         return proc.pid
 
+    # ── recovery after control-plane restart ─────────────────────────────────
+
+    async def recover_running_agents(self, agents: list[dict]) -> list[str]:
+        """Reconcile in-memory state with DB after a control-plane restart.
+
+        Agents the DB thinks are "running" either still have a live PID
+        (orphan — we track it so is_running/stop work) or are actually dead
+        (stale — caller should reset their DB status to "stopped").
+
+        Returns the list of agent_ids that are stale.
+        """
+        stale: list[str] = []
+        for rec in agents:
+            agent_id = rec.get("agent_id", "")
+            pid = rec.get("pid")
+            if not pid:
+                stale.append(agent_id)
+                continue
+            if _pid_alive(pid):
+                self._orphan_pids[agent_id] = pid
+                logger.info("Recovered orphan agent %s (pid=%d)", agent_id, pid)
+            else:
+                stale.append(agent_id)
+                logger.info(
+                    "Marking stale agent %s as stopped (pid=%d dead)", agent_id, pid
+                )
+        return stale
+
     # ── stop ──────────────────────────────────────────────────────────────────
 
     async def stop(self, agent_id: str, pid: int | None = None) -> None:
         fh = self._log_fhs.pop(agent_id, None)
         proc = self._procs.pop(agent_id, None)
+        orphan_pid = self._orphan_pids.pop(agent_id, None)
+
         if proc is not None:
             await self._terminate(proc)
             if fh is not None:
                 fh.close()
             return
+
         if fh is not None:
             fh.close()
 
-        if pid:
+        # Fall back to any known PID (orphan or caller-supplied)
+        effective_pid = orphan_pid or pid
+        if effective_pid:
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.kill(effective_pid, signal.SIGTERM)
                 await asyncio.sleep(_STOP_GRACE)
                 try:
-                    os.kill(pid, signal.SIGKILL)
+                    os.kill(effective_pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
             except ProcessLookupError:
@@ -131,4 +175,11 @@ class AgentProcessManager:
 
     def is_running(self, agent_id: str) -> bool:
         proc = self._procs.get(agent_id)
-        return proc is not None and proc.returncode is None
+        if proc is not None and proc.returncode is None:
+            return True
+        pid = self._orphan_pids.get(agent_id)
+        if pid:
+            if _pid_alive(pid):
+                return True
+            self._orphan_pids.pop(agent_id, None)
+        return False
