@@ -1,10 +1,9 @@
-"""Chibu gRPC client — streaming execution and info retrieval."""
+"""Chibu gRPC client — used by the control plane to talk to agent processes."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
@@ -13,6 +12,13 @@ from grpc import aio
 
 logger = logging.getLogger("chibu.grpc.client")
 
+_CHANNEL_OPTIONS = [
+    ("grpc.keepalive_time_ms", 20_000),
+    ("grpc.keepalive_timeout_ms", 5_000),
+    ("grpc.max_send_message_length", 32 * 1024 * 1024),
+    ("grpc.max_receive_message_length", 32 * 1024 * 1024),
+]
+
 
 @dataclass
 class ExecuteEvent:
@@ -20,11 +26,12 @@ class ExecuteEvent:
     content: str
     tool_name: str = ""
     is_done: bool = False
+    session_id: str = ""
     timestamp: int = 0
 
 
 class ChibuClient:
-    """Async gRPC client for a single Chibu Pi agent."""
+    """Async gRPC client for a single Chibu pi agent."""
 
     def __init__(
         self,
@@ -48,14 +55,7 @@ class ChibuClient:
 
     async def connect(self) -> None:
         from chibu.grpc_server import chibu_agent_pb2_grpc
-
-        options = [
-            ("grpc.keepalive_time_ms", 20_000),
-            ("grpc.keepalive_timeout_ms", 5_000),
-            ("grpc.max_send_message_length", 32 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 32 * 1024 * 1024),
-        ]
-        self._channel = aio.insecure_channel(self.address, options=options)
+        self._channel = aio.insecure_channel(self.address, options=_CHANNEL_OPTIONS)
         self._stub = chibu_agent_pb2_grpc.ChiAgentStub(self._channel)
 
     async def close(self) -> None:
@@ -64,9 +64,10 @@ class ChibuClient:
             self._channel = None
             self._stub = None
 
+    # ── health ────────────────────────────────────────────────────────────────
+
     async def ping(self) -> bool:
         from chibu.grpc_server import chibu_agent_pb2
-
         try:
             resp = await asyncio.wait_for(
                 self._stub.Ping(chibu_agent_pb2.PingRequest(message="health")),
@@ -76,9 +77,10 @@ class ChibuClient:
         except Exception:
             return False
 
+    # ── info ──────────────────────────────────────────────────────────────────
+
     async def get_info(self) -> dict:
         from chibu.grpc_server import chibu_agent_pb2
-
         resp = await self._stub.GetInfo(
             chibu_agent_pb2.InfoRequest(auth_token=self.auth_token),
             timeout=10.0,
@@ -86,19 +88,24 @@ class ChibuClient:
         return {
             "agent_id": resp.agent_id,
             "name": resp.name,
-            "agent_group": resp.agent_group,
-            "version": resp.version,
+            "chiboo": resp.chiboo,
             "skills": list(resp.skills),
-            "models": list(resp.models),
             "status": resp.status,
+            "grpc_port": resp.grpc_port,
+            "pid": resp.pid,
         }
+
+    # ── execute ───────────────────────────────────────────────────────────────
 
     async def execute(
         self,
         prompt: str,
+        model: str = "faah",
+        new_session: bool = False,
+        compact_first: bool = False,
+        files: list[str] | None = None,
+        timeout_seconds: int = 120,
         session_id: str = "",
-        model_id: str = "",
-        context: dict | None = None,
     ) -> AsyncGenerator[ExecuteEvent, None]:
         from chibu.grpc_server import chibu_agent_pb2
 
@@ -106,8 +113,11 @@ class ChibuClient:
             auth_token=self.auth_token,
             prompt=prompt,
             session_id=session_id,
-            model_id=model_id,
-            context=context or {},
+            model=model,
+            new_session=new_session,
+            compact_first=compact_first,
+            files=files or [],
+            timeout_seconds=timeout_seconds,
         )
 
         try:
@@ -117,6 +127,7 @@ class ChibuClient:
                     content=chunk.content,
                     tool_name=chunk.tool_name,
                     is_done=chunk.is_done,
+                    session_id=chunk.session_id,
                     timestamp=chunk.timestamp,
                 )
         except grpc.RpcError as exc:
@@ -128,9 +139,24 @@ class ChibuClient:
             )
 
     async def execute_sync(self, prompt: str, **kwargs) -> str:
-        """Convenience: collect full streaming response into a string."""
         parts: list[str] = []
         async for event in self.execute(prompt, **kwargs):
             if event.event_type == "text":
                 parts.append(event.content)
         return "".join(parts)
+
+    # ── reload ────────────────────────────────────────────────────────────────
+
+    async def reload(self) -> bool:
+        from chibu.grpc_server import chibu_agent_pb2
+        try:
+            resp = await asyncio.wait_for(
+                self._stub.Reload(
+                    chibu_agent_pb2.ReloadRequest(auth_token=self.auth_token)
+                ),
+                timeout=30.0,
+            )
+            return resp.ok
+        except Exception as exc:
+            logger.error("Reload failed: %s", exc)
+            return False

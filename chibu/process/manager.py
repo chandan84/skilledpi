@@ -1,11 +1,8 @@
-"""AgentProcessManager — starts and stops Pi agent subprocesses.
+"""AgentProcessManager — starts and stops Pi agent gRPC server subprocesses.
 
-Each agent gets its own OS process running chibu.grpc_server.server.
-Strategy: subprocess isolation for crash safety, gRPC port binding, and
-clean SIGTERM lifecycle.
-
-A JSON registry snapshot is written before each start so the subprocess
-can read agent metadata without a database connection.
+Each agent subprocess runs chibu.grpc_server.server, which in turn spawns
+`pi --mode rpc`.  This manager only knows about the gRPC server process;
+the pi subprocess lifetime is handled inside the server.
 """
 
 from __future__ import annotations
@@ -21,7 +18,7 @@ from pathlib import Path
 logger = logging.getLogger("chibu.process.manager")
 
 _READY_POLL_INTERVAL = 0.5
-_READY_TIMEOUT = 20.0
+_READY_TIMEOUT = 30.0
 _STOP_GRACE = 5.0
 
 
@@ -29,47 +26,35 @@ class AgentProcessManager:
     def __init__(self, agents_dir: Path, registry_snapshot_path: Path) -> None:
         self.agents_dir = agents_dir
         self.registry_snapshot = registry_snapshot_path
-        # agent_id → asyncio.subprocess.Process
         self._procs: dict[str, asyncio.subprocess.Process] = {}
 
     # ── start ─────────────────────────────────────────────────────────────────
 
     async def start(self, agent_record: dict) -> int:
-        """Spawn the agent subprocess; returns the PID."""
         agent_id = agent_record["agent_id"]
         port = agent_record["grpc_port"]
 
-        log_path = Path(agent_record["root_path"]) / "agent.log"
+        log_path = Path(agent_record["workspace_path"]) / "agent.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_fh = open(log_path, "a")  # noqa: SIM115  — must stay open
+        log_fh = open(log_path, "a")  # noqa: SIM115
 
         cmd = [
-            sys.executable,
-            "-m",
-            "chibu.grpc_server.server",
-            "--agent-id",
-            agent_id,
-            "--port",
-            str(port),
-            "--agents-dir",
-            str(self.agents_dir),
-            "--registry",
-            str(self.registry_snapshot),
+            sys.executable, "-m", "chibu.grpc_server.server",
+            "--agent-id", agent_id,
+            "--port", str(port),
+            "--agents-dir", str(self.agents_dir),
+            "--registry", str(self.registry_snapshot),
         ]
-
-        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=log_fh,
             stderr=asyncio.subprocess.STDOUT,
-            env=env,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
         self._procs[agent_id] = proc
-        logger.info(
-            "Spawned agent %s pid=%d port=%d", agent_record["name"], proc.pid, port
-        )
+        logger.info("Spawned agent %s pid=%d port=%d", agent_record["name"], proc.pid, port)
 
         asyncio.create_task(
             self._wait_ready(agent_id, port, proc),
@@ -81,14 +66,11 @@ class AgentProcessManager:
     # ── stop ──────────────────────────────────────────────────────────────────
 
     async def stop(self, agent_id: str, pid: int | None = None) -> None:
-        proc = self._procs.get(agent_id)
-
+        proc = self._procs.pop(agent_id, None)
         if proc is not None:
-            await self._terminate_proc(proc)
-            self._procs.pop(agent_id, None)
+            await self._terminate(proc)
             return
 
-        # Fall back to pid if we don't hold the proc handle (e.g. after restart)
         if pid:
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -100,12 +82,11 @@ class AgentProcessManager:
             except ProcessLookupError:
                 pass
 
-    # ── readiness poll ────────────────────────────────────────────────────────
+    # ── readiness ─────────────────────────────────────────────────────────────
 
     async def _wait_ready(
         self, agent_id: str, port: int, proc: asyncio.subprocess.Process
     ) -> bool:
-        """Poll gRPC Ping until the agent is up or the timeout expires."""
         from chibu.grpc_server.client import ChibuClient
 
         deadline = asyncio.get_event_loop().time() + _READY_TIMEOUT
@@ -116,18 +97,18 @@ class AgentProcessManager:
             try:
                 async with ChibuClient("127.0.0.1", port, "") as c:
                     if await c.ping():
-                        logger.info("Agent %s is ready on port %d", agent_id, port)
+                        logger.info("Agent %s ready on port %d", agent_id, port)
                         return True
             except Exception:
                 pass
             await asyncio.sleep(_READY_POLL_INTERVAL)
 
-        logger.warning("Agent %s readiness timeout after %.0fs", agent_id, _READY_TIMEOUT)
+        logger.warning("Agent %s readiness timeout", agent_id)
         return False
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    async def _terminate_proc(self, proc: asyncio.subprocess.Process) -> None:
+    async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
         try:
             proc.terminate()
             await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE)
@@ -136,11 +117,8 @@ class AgentProcessManager:
             await proc.wait()
 
     def write_registry_snapshot(self, agents: list[dict]) -> None:
-        """Serialize the registry to JSON so subprocesses can read it."""
         self.registry_snapshot.parent.mkdir(parents=True, exist_ok=True)
-        self.registry_snapshot.write_text(
-            json.dumps({"agents": agents}, indent=2)
-        )
+        self.registry_snapshot.write_text(json.dumps({"agents": agents}, indent=2))
 
     def is_running(self, agent_id: str) -> bool:
         proc = self._procs.get(agent_id)

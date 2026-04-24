@@ -1,21 +1,17 @@
-"""Agent CRUD and lifecycle endpoints."""
+"""Agent CRUD, lifecycle, skills, and extensions endpoints."""
 
 from __future__ import annotations
 
-import json
 import logging
 import os
+import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from chibu.control_plane.app import templates
 from chibu.control_plane.deps import get_process_manager, get_registry
-from chibu.db.engine import get_session
-from chibu.db.models import Agent, AgentEvent
+from chibu.db.models import Agent
 from chibu.process.manager import AgentProcessManager
 from chibu.registry.agent_registry import AgentRegistry
 from chibu.utils.filesystem import bootstrap_agent_root
@@ -24,45 +20,26 @@ router = APIRouter(tags=["agents"])
 logger = logging.getLogger("chibu.control_plane.agents")
 
 
+# ── Request models ────────────────────────────────────────────────────────────
+
 class CreateAgentRequest(BaseModel):
     name: str
-    agent_group: str
+    chiboo: str           # chiboo (group) name
     grpc_port: int | None = None
 
 
-# ── HTML pages ────────────────────────────────────────────────────────────────
-
-
-@router.get("/{agent_id}", response_class=HTMLResponse)
-async def agent_detail_page(
-    request: Request,
-    agent_id: str,
-    registry: AgentRegistry = Depends(get_registry),
-):
-    agent = await registry.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(404, "Agent not found")
-
-    skills = _list_skills(Path(agent.root_path))
-    return templates.TemplateResponse(
-        "agent_detail.html",
-        {
-            "request": request,
-            "agent": agent,
-            "skills": skills,
-            "auth_token_masked": agent.auth_token[:8] + "•" * 32,
-        },
-    )
-
-
-# ── JSON API ──────────────────────────────────────────────────────────────────
-
+# ── Agent CRUD ────────────────────────────────────────────────────────────────
 
 @router.get("/")
 async def list_agents(
-    group_id: str | None = None,
+    chiboo: str | None = None,
     registry: AgentRegistry = Depends(get_registry),
 ) -> list[dict]:
+    if chiboo:
+        group = await registry.get_group_by_name(chiboo)
+        group_id = group.id if group else None
+    else:
+        group_id = None
     agents = await registry.list_agents(group_id=group_id)
     return [_agent_dict(a) for a in agents]
 
@@ -74,17 +51,17 @@ async def create_agent(
     pm: AgentProcessManager = Depends(get_process_manager),
 ) -> dict:
     agents_dir = Path(os.getenv("CHIBU_AGENTS_DIR", "agents"))
-    root = agents_dir / body.name
+    workspace = agents_dir / body.chiboo / body.name
 
     agent = await registry.create_agent(
         name=body.name,
-        group_name=body.agent_group,
-        root_path=str(root.resolve()),
+        group_name=body.chiboo,
+        workspace_path=str(workspace.resolve()),
         grpc_port=body.grpc_port,
     )
 
-    bootstrap_agent_root(root, agent.agent_id, agent.name)
-    _flush_registry_snapshot(pm, registry)
+    bootstrap_agent_root(workspace, agent.agent_id, agent.name, body.chiboo)
+    _flush_snapshot(pm, registry)
 
     return _agent_dict(agent)
 
@@ -101,9 +78,11 @@ async def delete_agent(
     if agent.status == "running":
         raise HTTPException(409, "Stop the agent before deleting it")
 
-    deleted = await registry.delete_agent(agent_id)
-    return {"ok": deleted}
+    await registry.delete_agent(agent_id)
+    return {"ok": True}
 
+
+# ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 @router.post("/{agent_id}/start")
 async def start_agent(
@@ -118,10 +97,9 @@ async def start_agent(
         return {"status": agent.status, "pid": agent.pid}
 
     await registry.update_status(agent_id, "starting")
-    _flush_registry_snapshot(pm, registry)
+    _flush_snapshot(pm, registry)
 
-    agent_rec = _agent_record_for_subprocess(agent)
-    pid = await pm.start(agent_rec)
+    pid = await pm.start(_agent_record(agent))
     await registry.update_status(agent_id, "running", pid=pid)
     return {"status": "running", "pid": pid}
 
@@ -153,13 +131,14 @@ async def agent_status(
     if not agent:
         raise HTTPException(404, "Agent not found")
 
-    actual_running = pm.is_running(agent_id)
-    if agent.status == "running" and not actual_running:
+    if agent.status == "running" and not pm.is_running(agent_id):
         await registry.update_status(agent_id, "stopped", pid=None)
         return {"status": "stopped", "pid": None}
 
     return {"status": agent.status, "pid": agent.pid}
 
+
+# ── Skills ────────────────────────────────────────────────────────────────────
 
 @router.get("/{agent_id}/skills")
 async def list_skills(
@@ -169,18 +148,115 @@ async def list_skills(
     agent = await registry.get_agent(agent_id)
     if not agent:
         raise HTTPException(404, "Agent not found")
-    return _list_skills(Path(agent.root_path))
+    return _list_skills(Path(agent.workspace_path))
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+@router.post("/{agent_id}/skills")
+async def add_skill(
+    agent_id: str,
+    skill_name: str = Body(..., embed=True),
+    skill_content: str = Body(..., embed=True),
+    registry: AgentRegistry = Depends(get_registry),
+    pm: AgentProcessManager = Depends(get_process_manager),
+) -> dict:
+    """Create a new skill directory with a SKILL.md file, then hot-reload."""
+    agent = await registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
 
+    skill_dir = Path(agent.workspace_path) / ".pi" / "skills" / skill_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(skill_content)
+
+    await _hot_reload(agent, pm, registry)
+    return {"ok": True, "skill": skill_name, "reloaded": agent.status == "running"}
+
+
+@router.delete("/{agent_id}/skills/{skill_name}")
+async def remove_skill(
+    agent_id: str,
+    skill_name: str,
+    registry: AgentRegistry = Depends(get_registry),
+    pm: AgentProcessManager = Depends(get_process_manager),
+) -> dict:
+    agent = await registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    skill_dir = Path(agent.workspace_path) / ".pi" / "skills" / skill_name
+    if not skill_dir.exists():
+        raise HTTPException(404, f"Skill '{skill_name}' not found")
+
+    shutil.rmtree(skill_dir)
+    await _hot_reload(agent, pm, registry)
+    return {"ok": True, "reloaded": agent.status == "running"}
+
+
+# ── Extensions ────────────────────────────────────────────────────────────────
+
+@router.get("/{agent_id}/extensions")
+async def list_extensions(
+    agent_id: str,
+    registry: AgentRegistry = Depends(get_registry),
+) -> list[dict]:
+    agent = await registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    return _list_extensions(Path(agent.workspace_path))
+
+
+@router.post("/{agent_id}/extensions")
+async def add_extension(
+    agent_id: str,
+    ext_name: str = Body(..., embed=True),
+    ext_content: str = Body(..., embed=True),
+    registry: AgentRegistry = Depends(get_registry),
+    pm: AgentProcessManager = Depends(get_process_manager),
+) -> dict:
+    """Write a TypeScript extension file to .pi/extensions/ then hot-reload."""
+    agent = await registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    ext_dir = Path(agent.workspace_path) / ".pi" / "extensions"
+    ext_dir.mkdir(parents=True, exist_ok=True)
+    fname = ext_name if ext_name.endswith(".ts") else f"{ext_name}.ts"
+    (ext_dir / fname).write_text(ext_content)
+
+    await _hot_reload(agent, pm, registry)
+    return {"ok": True, "extension": fname, "reloaded": agent.status == "running"}
+
+
+@router.delete("/{agent_id}/extensions/{ext_name}")
+async def remove_extension(
+    agent_id: str,
+    ext_name: str,
+    registry: AgentRegistry = Depends(get_registry),
+    pm: AgentProcessManager = Depends(get_process_manager),
+) -> dict:
+    agent = await registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    ext_dir = Path(agent.workspace_path) / ".pi" / "extensions"
+    fname = ext_name if ext_name.endswith(".ts") else f"{ext_name}.ts"
+    target = ext_dir / fname
+    if not target.exists():
+        raise HTTPException(404, f"Extension '{fname}' not found")
+
+    target.unlink()
+    await _hot_reload(agent, pm, registry)
+    return {"ok": True, "reloaded": agent.status == "running"}
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _agent_dict(agent: Agent) -> dict:
+    chiboo = agent.group.name if agent.group else ""
     return {
         "agent_id": agent.agent_id,
         "name": agent.name,
-        "group_id": agent.group_id,
-        "group_name": agent.group.name if agent.group else "",
+        "chiboo": chiboo,
         "grpc_port": agent.grpc_port,
         "status": agent.status,
         "pid": agent.pid,
@@ -189,45 +265,73 @@ def _agent_dict(agent: Agent) -> dict:
     }
 
 
-def _agent_record_for_subprocess(agent: Agent) -> dict:
+def _agent_record(agent: Agent) -> dict:
     return {
         "agent_id": agent.agent_id,
         "name": agent.name,
-        "agent_group": agent.group.name if agent.group else "",
+        "chiboo": agent.group.name if agent.group else "",
         "auth_token": agent.auth_token,
         "grpc_port": agent.grpc_port,
-        "root_path": agent.root_path,
+        "workspace_path": agent.workspace_path,
     }
 
 
-def _list_skills(root: Path) -> list[dict]:
-    skills_dir = root / ".pi" / "skills"
+def _list_skills(workspace: Path) -> list[dict]:
+    skills_dir = workspace / ".pi" / "skills"
     if not skills_dir.exists():
         return []
     result = []
-    for f in sorted(skills_dir.glob("*.py")):
-        result.append({"name": f.stem, "file": f.name})
+    for d in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+        skill_md = d / "SKILL.md"
+        result.append({
+            "name": d.name,
+            "has_skill_md": skill_md.exists(),
+        })
     return result
 
 
-def _flush_registry_snapshot(
+def _list_extensions(workspace: Path) -> list[dict]:
+    ext_dir = workspace / ".pi" / "extensions"
+    if not ext_dir.exists():
+        return []
+    return [
+        {"name": f.name}
+        for f in sorted(ext_dir.glob("*.ts"))
+    ]
+
+
+async def _hot_reload(
+    agent: Agent,
     pm: AgentProcessManager,
     registry: AgentRegistry,
 ) -> None:
-    """Write registry snapshot after each mutation — done in background; errors are non-fatal."""
+    """If the agent is running, reload its pi subprocess via gRPC Reload RPC."""
+    if agent.status != "running":
+        return
+
+    try:
+        from chibu.grpc_server.client import ChibuClient
+        async with ChibuClient("127.0.0.1", agent.grpc_port, agent.auth_token) as client:
+            ok = await client.reload()
+            if not ok:
+                logger.warning("Reload returned ok=false for agent %s", agent.agent_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Hot-reload failed for agent %s: %s", agent.agent_id, exc)
+
+
+def _flush_snapshot(pm: AgentProcessManager, registry: AgentRegistry) -> None:
     import asyncio
 
-    async def _flush():
+    async def _do():
         try:
             agents = await registry.list_agents()
-            records = [_agent_record_for_subprocess(a) for a in agents]
-            pm.write_registry_snapshot(records)
+            pm.write_registry_snapshot([_agent_record(a) for a in agents])
         except Exception:  # noqa: BLE001
-            pass  # session may be closed after request commit; snapshot is best-effort
+            pass
 
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            loop.create_task(_flush())
+            loop.create_task(_do())
     except Exception:  # noqa: BLE001
         pass

@@ -34,22 +34,20 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Chibu Control Plane",
         version="0.1.0",
-        description="Pi Agent Platform by badmono org",
+        description="Pi Agent Platform — badmono org",
         lifespan=lifespan,
         docs_url="/api/docs",
         redoc_url="/api/redoc",
     )
 
-    # ── static files ──────────────────────────────────────────────────────────
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-    # ── routers ───────────────────────────────────────────────────────────────
-    from chibu.control_plane.routers import agents, groups, dashboard, ws
+    from chibu.control_plane.routers import agents, chiboos, dashboard, ws
 
     app.include_router(dashboard.router)
     app.include_router(agents.router, prefix="/agents")
-    app.include_router(groups.router, prefix="/groups")
+    app.include_router(chiboos.router, prefix="/chiboos")
     app.include_router(ws.router, prefix="/ws")
 
     return app

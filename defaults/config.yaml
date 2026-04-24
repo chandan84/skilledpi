@@ -1,31 +1,16 @@
-# Chibu Pi Agent — default config
-# This file is loaded by the extension runner and the agent itself.
-
+# Chibu Pi Agent — default configuration
 agent:
   version: "0.1.0"
   org: "badmono"
-  max_turns: 20
-  timeout_seconds: 120
 
 otel:
   enabled: false
-  endpoint: "http://localhost:4317"       # OTLP gRPC endpoint
-  http_endpoint: "http://localhost:4318"  # OTLP HTTP endpoint (alternative)
+  endpoint: "http://localhost:4317"
+  http_endpoint: "http://localhost:4318"
   service_name: "chibu-pi-agent"
   export_interval_ms: 5000
   protocol: "grpc"   # grpc | http
 
 logging:
-  # Overridden by env vars: CHIBU_DEBUG_LOGS, CHIBU_PERF_LOGS, CHIBU_LLM_LOGS
   debug: false
-  performance: false
-  llm: false
   level: "INFO"
-
-grpc:
-  host: "0.0.0.0"
-  port_range_start: 50051
-  port_range_end: 50200
-  max_workers: 10
-  keepalive_time_ms: 30000
-  keepalive_timeout_ms: 5000
