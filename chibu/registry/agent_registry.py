@@ -177,3 +177,12 @@ class AgentRegistry:
     async def _record_event(self, agent_id: str, event_type: str, payload: dict) -> None:
         self._s.add(AgentEvent(agent_id=agent_id, event_type=event_type, payload=payload))
         await self._s.flush()
+        try:
+            from chibu.honker import agent_events_stream
+            agent_events_stream().publish({
+                "agent_id": agent_id,
+                "event_type": event_type,
+                "payload": payload,
+            })
+        except Exception:  # noqa: BLE001
+            pass  # Honker not initialised (test/CLI contexts)

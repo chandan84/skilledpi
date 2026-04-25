@@ -18,7 +18,7 @@ from typing import Any
 
 logger = logging.getLogger("chibu.process.manager")
 
-_READY_POLL_INTERVAL = 0.5
+_READY_POLL_INTERVAL = 0.05   # 50ms — sentinel file check; was 500ms gRPC ping
 _READY_TIMEOUT = 30.0
 _STOP_GRACE = 5.0
 
@@ -40,17 +40,26 @@ class AgentProcessManager:
         self._log_fhs: dict[str, Any] = {}
         # PIDs of agents that were running before our last restart (orphan tracking)
         self._orphan_pids: dict[str, int] = {}
+        # Sentinel file paths written by gRPC server to signal readiness
+        self._sentinel_paths: dict[str, Path] = {}
+        # Per-agent log watchdog tasks
+        self._log_watchdog_tasks: dict[str, asyncio.Task] = {}
+        self._log_watchdog_stops: dict[str, asyncio.Event] = {}
 
     # ── start ─────────────────────────────────────────────────────────────────
 
     async def start(self, agent_record: dict) -> int:
         agent_id = agent_record["agent_id"]
         port = agent_record["grpc_port"]
+        workspace = Path(agent_record["workspace_path"])
 
-        log_path = Path(agent_record["workspace_path"]) / "agent.log"
+        log_path = workspace / "agent.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fh = open(log_path, "a")  # noqa: SIM115
         self._log_fhs[agent_id] = log_fh
+
+        # Store sentinel path before spawning so _wait_ready can find it
+        self._sentinel_paths[agent_id] = workspace / f".agent_ready_{port}"
 
         cmd = [
             sys.executable, "-m", "chibu.grpc_server.server",
@@ -73,6 +82,9 @@ class AgentProcessManager:
         ready = await self._wait_ready(agent_id, port, proc)
         if not ready:
             logger.warning("Agent %s failed readiness check", agent_id)
+
+        # Start log watchdog now that the subprocess is running
+        self._start_log_watchdog(agent_id, log_path)
 
         return proc.pid
 
@@ -107,6 +119,9 @@ class AgentProcessManager:
     # ── stop ──────────────────────────────────────────────────────────────────
 
     async def stop(self, agent_id: str, pid: int | None = None) -> None:
+        self._stop_log_watchdog(agent_id)
+        self._sentinel_paths.pop(agent_id, None)
+
         fh = self._log_fhs.pop(agent_id, None)
         proc = self._procs.pop(agent_id, None)
         orphan_pid = self._orphan_pids.pop(agent_id, None)
@@ -138,24 +153,56 @@ class AgentProcessManager:
     async def _wait_ready(
         self, agent_id: str, port: int, proc: asyncio.subprocess.Process
     ) -> bool:
-        from chibu.grpc_server.client import ChibuClient
-
+        sentinel = self._sentinel_paths.get(agent_id)
         deadline = asyncio.get_event_loop().time() + _READY_TIMEOUT
+
         while asyncio.get_event_loop().time() < deadline:
             if proc.returncode is not None:
                 logger.error("Agent %s exited prematurely (rc=%d)", agent_id, proc.returncode)
                 return False
+
+            # Primary: sentinel file written by gRPC server after server.start()
+            if sentinel and sentinel.exists():
+                logger.info("Agent %s ready (sentinel) on port %d", agent_id, port)
+                sentinel.unlink(missing_ok=True)
+                return True
+
+            # Fallback: gRPC ping for agents that don't write the sentinel
             try:
-                async with ChibuClient("127.0.0.1", port, "") as c:
+                from chibu.grpc_server.client import ChibuClient
+                async with ChibuClient("127.0.0.1", port, "", timeout=1.0) as c:
                     if await c.ping():
-                        logger.info("Agent %s ready on port %d", agent_id, port)
+                        logger.info("Agent %s ready (ping) on port %d", agent_id, port)
                         return True
             except Exception:
                 pass
+
             await asyncio.sleep(_READY_POLL_INTERVAL)
 
         logger.warning("Agent %s readiness timeout", agent_id)
         return False
+
+    # ── log watchdog ──────────────────────────────────────────────────────────
+
+    def _start_log_watchdog(self, agent_id: str, log_path: Path) -> None:
+        try:
+            from chibu.honker._workers import run_log_watchdog
+        except Exception:
+            return  # Honker disabled
+        stop_ev = asyncio.Event()
+        self._log_watchdog_stops[agent_id] = stop_ev
+        self._log_watchdog_tasks[agent_id] = asyncio.create_task(
+            run_log_watchdog(agent_id, log_path, stop_ev),
+            name=f"log-watchdog-{agent_id}",
+        )
+
+    def _stop_log_watchdog(self, agent_id: str) -> None:
+        stop_ev = self._log_watchdog_stops.pop(agent_id, None)
+        if stop_ev:
+            stop_ev.set()
+        task = self._log_watchdog_tasks.pop(agent_id, None)
+        if task:
+            task.cancel()
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

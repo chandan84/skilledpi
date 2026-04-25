@@ -107,6 +107,10 @@ async def serve(
         agent._proc.pid if agent._proc else "?",
     )
 
+    # Write a sentinel file so the control plane detects readiness via stat
+    # instead of polling gRPC pings.
+    _write_ready_sentinel(workspace, port)
+
     stop_event = asyncio.Event()
 
     def _handle_signal(sig, _frame):
@@ -132,6 +136,15 @@ async def serve(
         pass
 
     logger.info("Agent '%s' shut down cleanly", agent_rec["name"])
+
+
+def _write_ready_sentinel(workspace: Path, port: int) -> None:
+    """Create a file the control plane watches to confirm gRPC is accepting connections."""
+    try:
+        sentinel = workspace / f".agent_ready_{port}"
+        sentinel.write_text(str(os.getpid()))
+    except Exception:
+        pass
 
 
 def _load_agent_record(registry_path: Path, agent_id: str) -> dict:

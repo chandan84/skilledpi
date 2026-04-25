@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from typing import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -45,10 +46,17 @@ def _build_engine(db_url: str) -> AsyncEngine:
     if db_url.startswith("sqlite"):
         kwargs: dict = dict(_SQLITE_POOL_CONFIG)
         kwargs["connect_args"] = {"check_same_thread": False}
+        engine = create_async_engine(db_url, echo=False, **kwargs)
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _set_wal(conn, _record):
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+
+        return engine
     else:
         kwargs = dict(_PG_POOL_CONFIG)
-
-    return create_async_engine(db_url, echo=False, **kwargs)
+        return create_async_engine(db_url, echo=False, **kwargs)
 
 
 def get_engine() -> AsyncEngine:

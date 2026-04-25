@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -64,9 +65,38 @@ async def lifespan(app: FastAPI):
             await registry.update_status(agent_id, "stopped", pid=None)
         await session.commit()
 
+    # Initialise Honker (SQLite pub/sub + work queues) when enabled
+    honker_enabled = os.getenv("CHIBU_HONKER_ENABLED", "true").lower() not in ("false", "0", "no")
+    worker_tasks: list = []
+
+    if honker_enabled:
+        from chibu.honker import init_honker
+        from chibu.honker._workers import (
+            get_stop_event,
+            run_notification_pruner,
+            run_reload_worker,
+            run_snapshot_worker,
+        )
+
+        init_honker()
+        logger.info("Honker database initialised")
+
+        worker_tasks = [
+            asyncio.create_task(run_snapshot_worker(pm), name="honker-snapshot"),
+            asyncio.create_task(run_reload_worker(), name="honker-reload"),
+            asyncio.create_task(run_notification_pruner(), name="honker-pruner"),
+        ]
+
     logger.info("Control plane ready")
     yield
     logger.info("Control plane shutting down …")
+
+    if honker_enabled and worker_tasks:
+        get_stop_event().set()
+        for t in worker_tasks:
+            t.cancel()
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
+
     await dispose_engine()
 
 
@@ -83,12 +113,13 @@ def create_app() -> FastAPI:
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-    from chibu.control_plane.routers import agents, chiboos, dashboard, ws
+    from chibu.control_plane.routers import agents, chiboos, dashboard, events, ws
 
     app.include_router(dashboard.router)
     app.include_router(agents.router, prefix="/agents")
     app.include_router(chiboos.router, prefix="/chiboos")
     app.include_router(ws.router, prefix="/ws")
+    app.include_router(events.router, prefix="/events")
 
     @app.get("/health", tags=["health"])
     async def health():
