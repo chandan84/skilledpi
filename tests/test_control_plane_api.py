@@ -46,6 +46,7 @@ async def client(tmp_path, _test_db):
 
     os.environ["CHIBU_AGENTS_DIR"] = str(tmp_path / "agents")
     os.environ["CHIBU_REGISTRY_SNAPSHOT"] = str(tmp_path / "registry.json")
+    os.environ["CHIBU_HONKER_ENABLED"] = "false"
 
     from chibu.control_plane import deps
     deps.get_process_manager.cache_clear()
