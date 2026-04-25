@@ -19,7 +19,6 @@ router = APIRouter(tags=["realtime"])
 logger = logging.getLogger("chibu.control_plane.ws")
 
 _TAIL_LINES = 200
-_POLL_INTERVAL = 0.4
 
 
 # ── SSE execute (used by the dashboard UI) ────────────────────────────────────
@@ -102,19 +101,19 @@ async def ws_logs(
         for line in _tail(log_path, _TAIL_LINES):
             await websocket.send_text(line)
 
+    offset = log_path.stat().st_size if log_path.exists() else 0
+
     try:
-        offset = log_path.stat().st_size if log_path.exists() else 0
-        while True:
-            await asyncio.sleep(_POLL_INTERVAL)
-            if not log_path.exists():
-                continue
-            size = log_path.stat().st_size
-            if size <= offset:
+        from chibu.honker import LOG_WRITTEN, get_hdb
+        listener = get_hdb().listen(f"{LOG_WRITTEN}:{agent_id}")
+        async for notif in listener:
+            new_size = notif.payload.get("size", offset)
+            if new_size <= offset or not log_path.exists():
                 continue
             async with aiofiles.open(log_path, "r") as f:
                 await f.seek(offset)
-                new_text = await f.read()
-            offset = size
+                new_text = await f.read(new_size - offset)
+            offset = new_size
             for line in new_text.splitlines():
                 if line:
                     await websocket.send_text(line)

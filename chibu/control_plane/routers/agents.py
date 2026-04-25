@@ -311,33 +311,26 @@ async def _hot_reload(
     pm: AgentProcessManager,
     registry: AgentRegistry,
 ) -> None:
-    """If the agent is running, reload its pi subprocess via gRPC Reload RPC."""
+    """Enqueue a hot-reload job for the agent if it is running."""
     if agent.status != "running":
         return
 
     try:
-        from chibu.grpc_server.client import ChibuClient
-        async with ChibuClient("127.0.0.1", agent.grpc_port, agent.auth_token) as client:
-            ok = await client.reload()
-            if not ok:
-                logger.warning("Reload returned ok=false for agent %s", agent.agent_id)
+        from chibu.honker import reload_queue
+        reload_queue().enqueue({
+            "agent_id": agent.agent_id,
+            "grpc_port": agent.grpc_port,
+            "auth_token": agent.auth_token,
+        })
+        logger.debug("Enqueued hot-reload for agent %s", agent.agent_id)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Hot-reload failed for agent %s: %s", agent.agent_id, exc)
+        logger.warning("Failed to enqueue hot-reload for agent %s: %s", agent.agent_id, exc)
 
 
 def _flush_snapshot(pm: AgentProcessManager, registry: AgentRegistry) -> None:
-    import asyncio
-
-    async def _do():
-        try:
-            agents = await registry.list_agents()
-            pm.write_registry_snapshot([_agent_record(a) for a in agents])
-        except Exception:  # noqa: BLE001
-            pass
-
+    """Enqueue a snapshot flush job; the lifespan worker delivers it with retries."""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(_do())
+        from chibu.honker import snapshot_queue
+        snapshot_queue().enqueue({"action": "flush_snapshot"})
     except Exception:  # noqa: BLE001
         pass
