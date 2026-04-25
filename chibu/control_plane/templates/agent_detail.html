@@ -1,230 +1,616 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ agent.name }} — Chibu</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            surface: { DEFAULT: '#0d1117', 1: '#161b22', 2: '#21262d', 3: '#30363d' },
-            accent: { DEFAULT: '#7c3aed', light: '#a78bfa' },
-          },
-          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'monospace'] },
-        }
-      }
-    }
-  </script>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
-    * { box-sizing: border-box; }
-    body { background: #0d1117; color: #e6edf3; font-family: 'JetBrains Mono', monospace; }
-    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #161b22; } ::-webkit-scrollbar-thumb { background: #30363d; }
-    .gradient-border { background: linear-gradient(135deg,#7c3aed22,#0d1117,#7c3aed11); border: 1px solid #7c3aed44; }
-    .status-pill-running  { background:#10b98122; color:#34d399; border:1px solid #10b98144; }
-    .status-pill-stopped  { background:#6b728022; color:#9ca3af; border:1px solid #6b728044; }
-    .status-pill-starting { background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b44; }
-    .status-pill-error    { background:#f4364122; color:#fb7185; border:1px solid #f4364144; }
-    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
-    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
-    .fade-in { animation: fadeIn .3s ease; }
-    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
-    #log-terminal { font-size: 10px; line-height: 1.5; }
-    #log-terminal .log-line:hover { background: #21262d; }
-    input { background:#161b22; border:1px solid #30363d; color:#e6edf3; }
-    input:focus { outline:none; border-color:#7c3aed; box-shadow:0 0 0 2px #7c3aed33; }
-    .tab-btn.active { color:#a78bfa; border-bottom:2px solid #7c3aed; }
-    .tab-panel { display: none; } .tab-panel.active { display: block; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #faf9f6;
+      --surface:   #ffffff;
+      --border:    #e8e5e0;
+      --border-2:  #d4d0c8;
+      --text:      #1a1a1a;
+      --text-2:    #6b6b6b;
+      --text-3:    #9b9b9b;
+      --accent:    #d97757;
+      --accent-bg: #fff4f0;
+      --green:     #2e7d32;
+      --green-bg:  #f1f8f1;
+      --red:       #c62828;
+      --red-bg:    #fdf1f1;
+      --amber:     #b45309;
+      --amber-bg:  #fffbeb;
+      --mono:      'JetBrains Mono', monospace;
+      --sans:      'Inter', -apple-system, sans-serif;
+      --radius:    8px;
+    }
+
+    html, body { height: 100%; }
+    body { font-family: var(--sans); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+    ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+    /* ── topbar ── */
+    .topbar {
+      height: 52px; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex; align-items: center; gap: 12px;
+      position: sticky; top: 0; z-index: 20;
+    }
+    .back-link { color: var(--text-3); text-decoration: none; font-size: 13px; }
+    .back-link:hover { color: var(--text); }
+    .sep { color: var(--border-2); }
+    .agent-title { font-size: 15px; font-weight: 600; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+    .status-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; padding: 4px 10px; border-radius: 20px; border: 1px solid;
+    }
+    .status-chip.running { color: var(--green); border-color: #c8e6c9; background: var(--green-bg); }
+    .status-chip.stopped { color: var(--text-3); border-color: var(--border); background: var(--bg); }
+    .status-chip.starting { color: var(--amber); border-color: #fde68a; background: var(--amber-bg); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .dot.running { background: var(--green); animation: pulse 2s ease-in-out infinite; }
+    .dot.stopped { background: var(--text-3); }
+    .dot.starting { background: var(--amber); animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    .btn {
+      padding: 7px 14px; border-radius: 6px; font-size: 12px;
+      font-family: var(--sans); font-weight: 500; cursor: pointer; border: 1px solid;
+    }
+    .btn-start { background: var(--green-bg); border-color: #c8e6c9; color: var(--green); }
+    .btn-start:hover { background: #dcedc8; }
+    .btn-stop { background: var(--red-bg); border-color: #ffcdd2; color: var(--red); }
+    .btn-stop:hover { background: #ffcdd2; }
+    .btn-ghost { background: var(--bg); border-color: var(--border); color: var(--text-2); }
+    .btn-ghost:hover { background: var(--border); color: var(--text); }
+    .btn-accent { background: var(--accent); border-color: var(--accent); color: white; }
+    .btn-accent:hover { background: #c4674a; }
+
+    /* ── layout ── */
+    .layout { display: flex; height: calc(100vh - 52px); overflow: hidden; }
+
+    /* ── left panel ── */
+    .left-panel {
+      width: 340px; min-width: 300px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      background: var(--surface);
+    }
+
+    .panel-section { padding: 16px; border-bottom: 1px solid var(--border); }
+    .panel-label { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 10px; }
+
+    /* identity */
+    .identity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .identity-item {}
+    .identity-key { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); font-weight: 600; margin-bottom: 2px; }
+    .identity-val { font-size: 12px; font-family: var(--mono); color: var(--text); }
+
+    /* token */
+    .token-row { display: flex; align-items: center; gap: 6px; }
+    .token-display { font-size: 11px; font-family: var(--mono); color: var(--text-2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .icon-btn {
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text-3); cursor: pointer; padding: 3px 7px; font-size: 11px;
+    }
+    .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* prompt */
+    .prompt-area { padding: 16px; flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+    .model-row { display: flex; align-items: center; gap: 8px; }
+    .model-label { font-size: 11px; color: var(--text-3); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+    .model-select {
+      padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px;
+      font-size: 12px; font-family: var(--mono); background: var(--bg);
+      color: var(--text); cursor: pointer; outline: none;
+    }
+    .model-select:focus { border-color: var(--accent); }
+    .prompt-input {
+      width: 100%; min-height: 80px; padding: 10px 12px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; font-family: var(--sans); background: var(--bg);
+      color: var(--text); resize: vertical; outline: none;
+      transition: border-color .12s;
+    }
+    .prompt-input:focus { border-color: var(--accent); }
+    .options-row { display: flex; align-items: center; gap: 14px; }
+    .checkbox-label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-3); cursor: pointer; }
+    .checkbox-label input { accent-color: var(--accent); }
+    .run-btn {
+      width: 100%; padding: 9px; border-radius: 6px;
+      background: var(--accent); border: none; color: white;
+      font-size: 13px; font-family: var(--sans); font-weight: 500;
+      cursor: pointer; transition: background .12s;
+    }
+    .run-btn:hover { background: #c4674a; }
+    .run-btn:disabled { background: var(--border-2); cursor: not-allowed; }
+
+    /* ── right panel ── */
+    .right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); padding: 0 20px; background: var(--surface); }
+    .tab {
+      padding: 12px 16px; font-size: 13px; color: var(--text-3);
+      border-bottom: 2px solid transparent; cursor: pointer;
+      transition: color .12s, border-color .12s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+
+    .tab-content { flex: 1; overflow-y: auto; }
+
+    /* event stream */
+    .stream-panel { padding: 16px 20px; display: flex; flex-direction: column; gap: 2px; }
+    .stream-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .stream-label { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+    .stream-clear { background: none; border: none; font-size: 11px; color: var(--text-3); cursor: pointer; }
+    .stream-clear:hover { color: var(--red); }
+
+    .event-line {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 4px 8px; border-radius: 4px;
+      font-size: 12px; font-family: var(--mono);
+    }
+    .event-line:hover { background: var(--bg); }
+    .event-type {
+      font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+      padding: 2px 5px; border-radius: 3px; flex-shrink: 0; margin-top: 1px;
+    }
+    .event-type.text     { background: var(--accent-bg); color: var(--accent); }
+    .event-type.tool_use { background: #e8f4fd; color: #1565c0; }
+    .event-type.tool_result { background: var(--green-bg); color: var(--green); }
+    .event-type.done     { background: var(--bg); color: var(--text-3); }
+    .event-type.error    { background: var(--red-bg); color: var(--red); }
+    .event-type.agent_start { background: var(--bg); color: var(--text-3); }
+    .event-content { flex: 1; color: var(--text); line-height: 1.5; word-break: break-word; white-space: pre-wrap; }
+    .event-content.muted { color: var(--text-3); }
+
+    .stream-empty { padding: 48px 20px; text-align: center; color: var(--text-3); font-size: 13px; }
+
+    /* skills / extensions */
+    .list-panel { padding: 16px 20px; }
+    .list-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .list-item:last-child { border-bottom: none; }
+    .list-item-name { font-family: var(--mono); font-size: 12px; font-weight: 500; }
+    .list-item-sub { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+    .del-btn {
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text-3); cursor: pointer; padding: 3px 9px; font-size: 11px;
+    }
+    .del-btn:hover { border-color: var(--red); color: var(--red); }
+    .add-item-btn {
+      margin-top: 14px; width: 100%; padding: 8px;
+      background: none; border: 1px dashed var(--border-2); border-radius: 6px;
+      color: var(--text-3); font-size: 12px; font-family: var(--sans); cursor: pointer;
+    }
+    .add-item-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* logs */
+    .log-panel {
+      padding: 12px 16px;
+      background: #1a1a1a; color: #d0d0d0;
+      font-family: var(--mono); font-size: 11px; line-height: 1.6;
+      height: 100%; overflow-y: auto;
+    }
+    .log-line { padding: 1px 0; }
+    .log-line.err { color: #ef9a9a; }
+    .log-line.warn { color: #ffe082; }
+
+    /* ── modal ── */
+    .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.25); backdrop-filter: blur(4px); align-items: center; justify-content: center; }
+    .modal-backdrop.open { display: flex; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 480px; max-width: calc(100vw - 32px); box-shadow: 0 8px 32px rgba(0,0,0,.12); }
+    .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin-bottom: 5px; }
+    .field input, .field textarea { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-family: var(--mono); background: var(--bg); color: var(--text); outline: none; }
+    .field textarea { min-height: 160px; resize: vertical; }
+    .field input:focus, .field textarea:focus { border-color: var(--accent); }
+    .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .btn-cancel { flex:1;padding:9px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text-2);font-size:13px;font-family:var(--sans);cursor:pointer; }
+    .btn-submit { flex:1;padding:9px;border-radius:6px;border:none;background:var(--accent);color:white;font-size:13px;font-family:var(--sans);font-weight:500;cursor:pointer; }
+
+    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; padding: 11px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 500; box-shadow: 0 4px 16px rgba(0,0,0,.12); opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { background: var(--green-bg); color: var(--green); border: 1px solid #c8e6c9; }
+    .toast.error { background: var(--red-bg); color: var(--red); border: 1px solid #ffcdd2; }
+    .toast.info { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
   </style>
 </head>
-<body class="min-h-screen flex flex-col">
+<body>
 
-<!-- Nav -->
-<header class="border-b border-surface-3 bg-surface-1 px-6 py-3 flex items-center gap-3 sticky top-0 z-30">
-  <a href="/" class="text-surface-3 hover:text-white text-xs">← Control Plane</a>
-  <span class="text-surface-3">/</span>
-  <div class="w-5 h-5 rounded bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center text-white text-[10px] font-bold">χ</div>
-  <span class="text-sm font-bold text-white">{{ agent.name }}</span>
-  <span id="status-badge" class="status-pill-{{ agent.status }} text-[10px] px-2 py-0.5 rounded-full ml-1">
-    {% if agent.status == 'running' %}<span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>{% endif %}
-    {{ agent.status }}
-  </span>
-  <div class="ml-auto flex gap-2">
+<!-- Topbar -->
+<div class="topbar">
+  <a href="/" class="back-link">← Chibu</a>
+  <span class="sep">/</span>
+  <span style="color:var(--text-3);font-size:13px">{{ agent.group.name if agent.group else '—' }}</span>
+  <span class="sep">/</span>
+  <span class="agent-title">{{ agent.name }}</span>
+  <div class="topbar-right">
+    <span class="status-chip {{ agent.status }}" id="status-chip">
+      <div class="dot {{ agent.status }}" id="status-dot"></div>
+      <span id="status-text">{{ agent.status }}</span>
+    </span>
     {% if agent.status == 'running' %}
-    <button onclick="stopAgent()" class="px-3 py-1.5 rounded-md bg-rose-900/30 text-rose-400 hover:bg-rose-900/50 text-xs border border-rose-900/50 transition-colors">Stop</button>
+    <button class="btn btn-stop" id="lifecycle-btn" onclick="stopAgent()">Stop</button>
     {% else %}
-    <button onclick="startAgent()" class="px-3 py-1.5 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 text-xs border border-emerald-900/50 transition-colors">Start</button>
+    <button class="btn btn-start" id="lifecycle-btn" onclick="startAgent()">Start</button>
     {% endif %}
   </div>
-</header>
-
-<div class="p-6 max-w-6xl mx-auto w-full fade-in">
-
-  <!-- Identity cards -->
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-    {% for label, val, sub in [
-      ("Agent ID",   agent.agent_id[:8]+'…', agent.agent_id),
-      ("Group",      agent.group.name if agent.group else '—', ''),
-      ("gRPC Port", ':' ~ agent.grpc_port, '127.0.0.1:' ~ agent.grpc_port),
-      ("PID",        agent.pid if agent.pid else '—', ''),
-    ] %}
-    <div class="gradient-border rounded-xl p-4">
-      <p class="text-[10px] uppercase tracking-widest text-surface-3 mb-1">{{ label }}</p>
-      <p class="text-sm font-bold text-white truncate font-mono" title="{{ sub }}">{{ val }}</p>
-      {% if sub %}<p class="text-[10px] text-surface-3 mt-0.5 truncate">{{ sub }}</p>{% endif %}
-    </div>
-    {% endfor %}
-  </div>
-
-  <!-- Auth token -->
-  <div class="gradient-border rounded-xl p-4 mb-6 flex items-center gap-3">
-    <div class="flex-1">
-      <p class="text-[10px] uppercase tracking-widest text-surface-3 mb-1">Auth Token</p>
-      <div class="flex items-center gap-2">
-        <code id="token-display" class="text-xs font-mono text-accent-light">{{ auth_token_masked }}</code>
-        <button onclick="revealToken()" class="text-[10px] text-surface-3 hover:text-white px-2 py-0.5 rounded bg-surface-2 transition-colors" id="reveal-btn">Show</button>
-        <button onclick="copyToken()" class="text-[10px] text-surface-3 hover:text-accent-light px-2 py-0.5 rounded bg-surface-2 transition-colors">Copy</button>
-      </div>
-    </div>
-    <div class="text-surface-3 text-xs">
-      <p>Connect with:</p>
-      <code class="text-[10px] text-accent-light">chibu client connect --token &lt;token&gt; --port {{ agent.grpc_port }}</code>
-    </div>
-  </div>
-
-  <!-- Tabs -->
-  <div class="border-b border-surface-3 mb-4 flex gap-4">
-    {% for tab_id, label in [('skills','Skills'), ('logs','Live Logs'), ('models','Models')] %}
-    <button class="tab-btn text-xs py-2 text-surface-3 hover:text-white transition-colors {% if loop.first %}active{% endif %}"
-            onclick="switchTab('{{ tab_id }}')">{{ label }}</button>
-    {% endfor %}
-  </div>
-
-  <!-- Skills tab -->
-  <div id="tab-skills" class="tab-panel active fade-in">
-    <div class="gradient-border rounded-xl overflow-hidden">
-      <table class="w-full text-xs">
-        <thead>
-          <tr class="border-b border-surface-3 text-[10px] uppercase tracking-widest text-surface-3">
-            <th class="text-left px-4 py-2.5">Skill</th>
-            <th class="text-left px-4 py-2.5">File</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for skill in skills %}
-          <tr class="border-b border-surface-3/50 hover:bg-surface-2/50 transition-colors">
-            <td class="px-4 py-2.5 font-bold text-accent-light">{{ skill.name }}</td>
-            <td class="px-4 py-2.5 text-surface-3 font-mono">{{ skill.file }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="2" class="px-4 py-6 text-center text-surface-3">No skills loaded</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Logs tab -->
-  <div id="tab-logs" class="tab-panel fade-in">
-    <div class="gradient-border rounded-xl overflow-hidden">
-      <div class="flex items-center justify-between px-4 py-2 border-b border-surface-3">
-        <p class="text-[10px] uppercase tracking-widest text-surface-3">Live Log Stream</p>
-        <div class="flex items-center gap-1.5">
-          <span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-          <span class="text-[10px] text-emerald-400">streaming</span>
-        </div>
-      </div>
-      <div id="log-terminal" class="bg-surface-1 p-4 h-96 overflow-y-auto" id="log-output">
-        <p class="text-surface-3">Connecting to log stream…</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Models tab -->
-  <div id="tab-models" class="tab-panel fade-in">
-    <div id="models-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="gradient-border rounded-xl p-6 text-center text-surface-3 text-xs col-span-2">Loading models…</div>
-    </div>
-  </div>
-
 </div>
 
-<div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-xs font-medium shadow-lg border fade-in"></div>
-<script src="/static/main.js"></script>
+<div class="layout">
+
+  <!-- ── Left panel ── -->
+  <div class="left-panel">
+
+    <!-- Identity -->
+    <div class="panel-section">
+      <div class="panel-label">Identity</div>
+      <div class="identity-grid">
+        <div class="identity-item">
+          <div class="identity-key">Agent ID</div>
+          <div class="identity-val" style="font-size:11px">{{ agent.agent_id }}</div>
+        </div>
+        <div class="identity-item">
+          <div class="identity-key">Chiboo</div>
+          <div class="identity-val">{{ agent.group.name if agent.group else '—' }}</div>
+        </div>
+        <div class="identity-item">
+          <div class="identity-key">gRPC port</div>
+          <div class="identity-val">:{{ agent.grpc_port }}</div>
+        </div>
+        <div class="identity-item">
+          <div class="identity-key">PID</div>
+          <div class="identity-val" id="pid-val">{{ agent.pid if agent.pid else '—' }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Token -->
+    <div class="panel-section">
+      <div class="panel-label">Auth token</div>
+      <div class="token-row">
+        <span class="token-display" id="token-display">{{ agent.auth_token[:8] }}••••••••••••••••••••••••••••••••</span>
+        <button class="icon-btn" onclick="toggleToken()">Show</button>
+        <button class="icon-btn" onclick="copyToken()">Copy</button>
+      </div>
+    </div>
+
+    <!-- Prompt -->
+    <div class="prompt-area">
+      <div class="model-row">
+        <span class="model-label">Model</span>
+        <select class="model-select" id="model-select">
+          <option value="faah">faah</option>
+          <option value="staah">staah</option>
+        </select>
+      </div>
+      <textarea class="prompt-input" id="prompt-input" placeholder="Ask anything…" rows="4"></textarea>
+      <div class="options-row">
+        <label class="checkbox-label"><input type="checkbox" id="opt-new-session" /> new session</label>
+        <label class="checkbox-label"><input type="checkbox" id="opt-compact" /> compact first</label>
+      </div>
+      <button class="run-btn" id="run-btn" onclick="runPrompt()">Run ▶</button>
+    </div>
+  </div>
+
+  <!-- ── Right panel ── -->
+  <div class="right-panel">
+    <div class="tabs">
+      <div class="tab active" id="tab-btn-stream" onclick="switchTab('stream')">Event stream</div>
+      <div class="tab" id="tab-btn-skills" onclick="switchTab('skills')">Skills</div>
+      <div class="tab" id="tab-btn-extensions" onclick="switchTab('extensions')">Extensions</div>
+      <div class="tab" id="tab-btn-logs" onclick="switchTab('logs')">Logs</div>
+    </div>
+
+    <div class="tab-content">
+
+      <!-- Stream -->
+      <div id="tab-stream">
+        <div class="stream-panel">
+          <div class="stream-header">
+            <span class="stream-label">Pi RPC events</span>
+            <button class="stream-clear" onclick="clearStream()">Clear</button>
+          </div>
+          <div id="stream-output">
+            <div class="stream-empty">Run a prompt to see events…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Skills -->
+      <div id="tab-skills" style="display:none">
+        <div class="list-panel">
+          <div id="skills-list">Loading…</div>
+          <button class="add-item-btn" onclick="openAddSkill()">+ Add skill</button>
+        </div>
+      </div>
+
+      <!-- Extensions -->
+      <div id="tab-extensions" style="display:none">
+        <div class="list-panel">
+          <div id="extensions-list">Loading…</div>
+          <button class="add-item-btn" onclick="openAddExtension()">+ Add extension</button>
+        </div>
+      </div>
+
+      <!-- Logs -->
+      <div id="tab-logs" style="display:none">
+        <div class="log-panel" id="log-output">Connecting…</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Add skill modal -->
+<div class="modal-backdrop" id="modal-skill" onclick="closeModal('skill',event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Add skill</div>
+    <div class="field"><label>Skill name</label><input id="skill-name" placeholder="my-skill" /></div>
+    <div class="field"><label>SKILL.md content</label><textarea id="skill-content" placeholder="---&#10;name: my-skill&#10;description: What this skill does.&#10;---&#10;&#10;# My Skill&#10;..."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('skill')">Cancel</button>
+      <button class="btn-submit" onclick="addSkill()">Add skill</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add extension modal -->
+<div class="modal-backdrop" id="modal-extension" onclick="closeModal('extension',event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Add extension</div>
+    <div class="field"><label>Extension name</label><input id="ext-name" placeholder="my-extension" /></div>
+    <div class="field"><label>TypeScript content</label><textarea id="ext-content" placeholder="export default function(pi) {&#10;  // your extension code&#10;}"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('extension')">Cancel</button>
+      <button class="btn-submit" onclick="addExtension()">Add extension</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
 <script>
   const AGENT_ID = "{{ agent.agent_id }}";
   const FULL_TOKEN = "{{ agent.auth_token }}";
+  let tokenVisible = false;
 
-  // ── Tabs ────────────────────────────────────────────────────────────────────
-  function switchTab(id) {
-    document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', b.textContent.toLowerCase().includes(id.toLowerCase().slice(0,3))));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + id));
+  // ── Tab switching ─────────────────────────────────────────────────────────
+  function switchTab(name) {
+    ['stream','skills','extensions','logs'].forEach(t => {
+      document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
+      document.getElementById('tab-btn-' + t).classList.toggle('active', t === name);
+    });
+    if (name === 'skills') loadSkills();
+    if (name === 'extensions') loadExtensions();
+    if (name === 'logs') initLogStream();
   }
 
-  // ── Token reveal ────────────────────────────────────────────────────────────
-  let tokenRevealed = false;
-  function revealToken() {
-    tokenRevealed = !tokenRevealed;
-    document.getElementById('token-display').textContent = tokenRevealed ? FULL_TOKEN : FULL_TOKEN.slice(0,8) + '•'.repeat(32);
-    document.getElementById('reveal-btn').textContent = tokenRevealed ? 'Hide' : 'Show';
+  // ── Token ─────────────────────────────────────────────────────────────────
+  function toggleToken() {
+    tokenVisible = !tokenVisible;
+    const d = document.getElementById('token-display');
+    d.textContent = tokenVisible ? FULL_TOKEN : FULL_TOKEN.slice(0,8) + '•'.repeat(32);
+    d.previousElementSibling && void 0; // keep ref
+    document.querySelectorAll('.icon-btn')[0].textContent = tokenVisible ? 'Hide' : 'Show';
   }
   function copyToken() {
-    navigator.clipboard.writeText(FULL_TOKEN).then(() => showToast('Token copied!', 'success'));
+    navigator.clipboard.writeText(FULL_TOKEN).then(() => showToast('Token copied', 'success'));
   }
 
-  // ── Agent lifecycle ─────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
   async function startAgent() {
+    const btn = document.getElementById('lifecycle-btn');
+    btn.disabled = true; btn.textContent = '…';
     const r = await fetch(`/agents/${AGENT_ID}/start`, { method: 'POST' });
     const d = await r.json();
-    showToast(r.ok ? `Agent starting… (pid ${d.pid})` : d.detail, r.ok ? 'success' : 'error');
-    if (r.ok) setTimeout(() => location.reload(), 2000);
+    if (r.ok) { showToast('Starting…', 'success'); setTimeout(() => location.reload(), 2000); }
+    else { showToast(d.detail || 'Error', 'error'); btn.disabled = false; btn.textContent = 'Start'; }
   }
   async function stopAgent() {
+    const btn = document.getElementById('lifecycle-btn');
+    btn.disabled = true; btn.textContent = '…';
     const r = await fetch(`/agents/${AGENT_ID}/stop`, { method: 'POST' });
-    showToast(r.ok ? 'Agent stopped' : (await r.json()).detail, r.ok ? 'info' : 'error');
-    if (r.ok) setTimeout(() => location.reload(), 500);
+    if (r.ok) { showToast('Stopped', 'info'); setTimeout(() => location.reload(), 600); }
+    else { showToast((await r.json()).detail || 'Error', 'error'); btn.disabled = false; btn.textContent = 'Stop'; }
   }
 
-  // ── Log streaming (WebSocket) ───────────────────────────────────────────────
+  // ── Prompt / event stream ─────────────────────────────────────────────────
+  let _running = false;
+
+  async function runPrompt() {
+    if (_running) return;
+    const prompt = document.getElementById('prompt-input').value.trim();
+    if (!prompt) return;
+
+    const model = document.getElementById('model-select').value;
+    const newSession = document.getElementById('opt-new-session').checked;
+    const compact = document.getElementById('opt-compact').checked;
+
+    _running = true;
+    const btn = document.getElementById('run-btn');
+    btn.disabled = true; btn.textContent = 'Running…';
+
+    const out = document.getElementById('stream-output');
+    out.innerHTML = '';
+
+    // Use SSE-style streaming via fetch
+    try {
+      const resp = await fetch(`/ws/${AGENT_ID}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, model, new_session: newSession, compact_first: compact, timeout_seconds: 120 })
+      });
+
+      if (!resp.ok) {
+        appendEvent('error', '', 'HTTP ' + resp.status);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          try {
+            const ev = JSON.parse(line.slice(5).trim());
+            appendEvent(ev.event_type, ev.tool_name, ev.content, ev.is_done);
+          } catch {}
+        }
+      }
+    } catch (err) {
+      appendEvent('error', '', String(err));
+    } finally {
+      _running = false;
+      btn.disabled = false; btn.textContent = 'Run ▶';
+    }
+  }
+
+  function appendEvent(type, tool, content, isDone) {
+    const out = document.getElementById('stream-output');
+    // Remove empty state
+    const empty = out.querySelector('.stream-empty');
+    if (empty) empty.remove();
+
+    const line = document.createElement('div');
+    line.className = 'event-line';
+
+    const badge = document.createElement('span');
+    badge.className = `event-type ${type}`;
+    badge.textContent = tool ? tool : type;
+    line.appendChild(badge);
+
+    if (content) {
+      const text = document.createElement('span');
+      text.className = 'event-content' + (type === 'agent_start' || type === 'done' ? ' muted' : '');
+      text.textContent = content.length > 400 ? content.slice(0, 400) + '…' : content;
+      line.appendChild(text);
+    }
+
+    out.appendChild(line);
+    out.parentElement.scrollTop = out.parentElement.scrollHeight;
+  }
+
+  function clearStream() {
+    document.getElementById('stream-output').innerHTML = '<div class="stream-empty">Run a prompt to see events…</div>';
+  }
+
+  // ── Skills ────────────────────────────────────────────────────────────────
+  async function loadSkills() {
+    const resp = await fetch(`/agents/${AGENT_ID}/skills`);
+    const skills = await resp.json();
+    const el = document.getElementById('skills-list');
+    if (!skills.length) { el.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:12px 0">No skills installed.</div>'; return; }
+    el.innerHTML = skills.map(s => `
+      <div class="list-item">
+        <div><div class="list-item-name">${s.name}</div><div class="list-item-sub">${s.has_skill_md ? 'SKILL.md' : 'no SKILL.md'}</div></div>
+        <button class="del-btn" onclick="removeSkill('${s.name}')">Remove</button>
+      </div>`).join('');
+  }
+
+  function openAddSkill() { document.getElementById('modal-skill').classList.add('open'); }
+  async function addSkill() {
+    const name = document.getElementById('skill-name').value.trim();
+    const content = document.getElementById('skill-content').value;
+    if (!name) return;
+    const r = await fetch(`/agents/${AGENT_ID}/skills`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ skill_name: name, skill_content: content })
+    });
+    if (r.ok) { closeModal('skill'); showToast('Skill added', 'success'); loadSkills(); }
+    else showToast((await r.json()).detail || 'Error', 'error');
+  }
+  async function removeSkill(name) {
+    if (!confirm(`Remove skill '${name}'?`)) return;
+    const r = await fetch(`/agents/${AGENT_ID}/skills/${name}`, { method: 'DELETE' });
+    if (r.ok) { showToast('Skill removed', 'info'); loadSkills(); }
+    else showToast('Error', 'error');
+  }
+
+  // ── Extensions ────────────────────────────────────────────────────────────
+  async function loadExtensions() {
+    const resp = await fetch(`/agents/${AGENT_ID}/extensions`);
+    const exts = await resp.json();
+    const el = document.getElementById('extensions-list');
+    if (!exts.length) { el.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:12px 0">No extensions installed.</div>'; return; }
+    el.innerHTML = exts.map(e => `
+      <div class="list-item">
+        <div><div class="list-item-name">${e.name}</div><div class="list-item-sub">TypeScript extension</div></div>
+        <button class="del-btn" onclick="removeExtension('${e.name}')">Remove</button>
+      </div>`).join('');
+  }
+
+  function openAddExtension() { document.getElementById('modal-extension').classList.add('open'); }
+  async function addExtension() {
+    const name = document.getElementById('ext-name').value.trim();
+    const content = document.getElementById('ext-content').value;
+    if (!name) return;
+    const r = await fetch(`/agents/${AGENT_ID}/extensions`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ ext_name: name, ext_content: content })
+    });
+    if (r.ok) { closeModal('extension'); showToast('Extension added', 'success'); loadExtensions(); }
+    else showToast((await r.json()).detail || 'Error', 'error');
+  }
+  async function removeExtension(name) {
+    if (!confirm(`Remove extension '${name}'?`)) return;
+    const r = await fetch(`/agents/${AGENT_ID}/extensions/${name}`, { method: 'DELETE' });
+    if (r.ok) { showToast('Extension removed', 'info'); loadExtensions(); }
+    else showToast('Error', 'error');
+  }
+
+  // ── Log streaming ─────────────────────────────────────────────────────────
+  let _logWs = null;
   function initLogStream() {
-    const out = document.getElementById('log-terminal');
-    const host = location.host;
-    const ws = new WebSocket(`ws://${host}/ws/${AGENT_ID}/logs`);
-    ws.onopen = () => { out.innerHTML = ''; };
-    ws.onmessage = e => {
+    if (_logWs) return;
+    const out = document.getElementById('log-output');
+    out.textContent = '';
+    _logWs = new WebSocket(`ws://${location.host}/ws/${AGENT_ID}/logs`);
+    _logWs.onmessage = e => {
       const line = document.createElement('div');
-      line.className = 'log-line px-1 py-0.5 rounded';
-      line.style.color = e.data.includes('ERROR') ? '#fb7185' : e.data.includes('WARN') ? '#fbbf24' : '#9ca3af';
+      line.className = 'log-line' + (e.data.includes('ERROR') ? ' err' : e.data.includes('WARN') ? ' warn' : '');
       line.textContent = e.data;
       out.appendChild(line);
       out.scrollTop = out.scrollHeight;
     };
-    ws.onclose = () => setTimeout(initLogStream, 3000);
+    _logWs.onclose = () => { _logWs = null; setTimeout(initLogStream, 3000); };
   }
-  initLogStream();
 
-  // ── Models ──────────────────────────────────────────────────────────────────
-  fetch(`/agents/${AGENT_ID}/status`).then(r => r.json()).then(() => {
-    // Models are read from models.json via the skills endpoint; render statically
-    const models = [
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', ctx: '200K', isDefault: true },
-      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', ctx: '200K', isDefault: false },
-    ];
-    document.getElementById('models-container').innerHTML = models.map(m => `
-      <div class="gradient-border rounded-xl p-4 ${m.isDefault ? 'shadow-glow-accent' : ''}">
-        <div class="flex items-center justify-between mb-2">
-          <p class="text-sm font-bold text-white">${m.name}</p>
-          ${m.isDefault ? '<span class="text-[10px] bg-violet-900/50 text-accent-light px-2 py-0.5 rounded-full border border-violet-800">default</span>' : ''}
-        </div>
-        <p class="text-[10px] font-mono text-surface-3">${m.id}</p>
-        <p class="text-xs text-surface-3 mt-2">Context: ${m.ctx} tokens</p>
-      </div>
-    `).join('');
-  });
+  // ── Modal helpers ─────────────────────────────────────────────────────────
+  function closeModal(id, e) {
+    if (e && e.target !== document.getElementById('modal-' + id)) return;
+    document.getElementById('modal-' + id).classList.remove('open');
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  let _toastT;
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = `toast show ${type}`;
+    clearTimeout(_toastT); _toastT = setTimeout(() => t.classList.remove('show'), 3000);
+  }
 </script>
+
 </body>
 </html>

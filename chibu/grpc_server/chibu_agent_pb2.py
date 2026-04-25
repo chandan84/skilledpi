@@ -24,35 +24,35 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63hibu_agent.proto\x12\x05\x63hibu\"\xbf\x01\n\x0e\x45xecuteRequest\x12\x12\n\nauth_token\x18\x01 \x01(\t\x12\x0e\n\x06prompt\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\x33\n\x07\x63ontext\x18\x04 \x03(\x0b\x32\".chibu.ExecuteRequest.ContextEntry\x12\x10\n\x08model_id\x18\x05 \x01(\t\x1a.\n\x0c\x43ontextEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x81\x01\n\x0f\x45xecuteResponse\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x0f\n\x07is_done\x18\x02 \x01(\x08\x12\x12\n\nevent_type\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x11\n\ttimestamp\x18\x05 \x01(\x03\x12\x11\n\ttool_name\x18\x06 \x01(\t\"!\n\x0bInfoRequest\x12\x12\n\nauth_token\x18\x01 \x01(\t\"\x97\x01\n\x0cInfoResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x13\n\x0b\x61gent_group\x18\x03 \x01(\t\x12\x0f\n\x07version\x18\x04 \x01(\t\x12\x0e\n\x06skills\x18\x05 \x03(\t\x12\x0e\n\x06models\x18\x06 \x03(\t\x12\x0e\n\x06status\x18\x07 \x01(\t\x12\x11\n\tgrpc_port\x18\x08 \x01(\x05\"\'\n\x11ListSkillsRequest\x12\x12\n\nauth_token\x18\x01 \x01(\t\"S\n\tSkillInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x0f\n\x07version\x18\x03 \x01(\t\x12\x12\n\nparameters\x18\x04 \x03(\t\"6\n\x12ListSkillsResponse\x12 \n\x06skills\x18\x01 \x03(\x0b\x32\x10.chibu.SkillInfo\"\x1e\n\x0bPingRequest\x12\x0f\n\x07message\x18\x01 \x01(\t\"2\n\x0cPongResponse\x12\x0f\n\x07message\x18\x01 \x01(\t\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\x32\xee\x01\n\x08\x43hiAgent\x12:\n\x07\x45xecute\x12\x15.chibu.ExecuteRequest\x1a\x16.chibu.ExecuteResponse0\x01\x12\x32\n\x07GetInfo\x12\x12.chibu.InfoRequest\x1a\x13.chibu.InfoResponse\x12\x41\n\nListSkills\x12\x18.chibu.ListSkillsRequest\x1a\x19.chibu.ListSkillsResponse\x12/\n\x04Ping\x12\x12.chibu.PingRequest\x1a\x13.chibu.PongResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11\x63hibu_agent.proto\x12\x05\x63hibu\"\xab\x01\n\x0e\x45xecuteRequest\x12\x12\n\nauth_token\x18\x01 \x01(\t\x12\x0e\n\x06prompt\x18\x02 \x01(\t\x12\x12\n\nsession_id\x18\x03 \x01(\t\x12\r\n\x05model\x18\x05 \x01(\t\x12\x13\n\x0bnew_session\x18\x06 \x01(\x08\x12\x15\n\rcompact_first\x18\x07 \x01(\x08\x12\r\n\x05\x66iles\x18\x08 \x03(\t\x12\x17\n\x0ftimeout_seconds\x18\t \x01(\x05\"\x81\x01\n\x0f\x45xecuteResponse\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x0f\n\x07is_done\x18\x02 \x01(\x08\x12\x12\n\nevent_type\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x11\n\ttimestamp\x18\x05 \x01(\x03\x12\x11\n\ttool_name\x18\x06 \x01(\t\"!\n\x0bInfoRequest\x12\x12\n\nauth_token\x18\x01 \x01(\t\"~\n\x0cInfoResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06\x63hiboo\x18\x03 \x01(\t\x12\x0e\n\x06skills\x18\x05 \x03(\t\x12\x0e\n\x06status\x18\x07 \x01(\t\x12\x11\n\tgrpc_port\x18\x08 \x01(\x05\x12\x0b\n\x03pid\x18\t \x01(\t\"\'\n\x11ListSkillsRequest\x12\x12\n\nauth_token\x18\x01 \x01(\t\"?\n\tSkillInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x0f\n\x07license\x18\x03 \x01(\t\"6\n\x12ListSkillsResponse\x12 \n\x06skills\x18\x01 \x03(\x0b\x32\x10.chibu.SkillInfo\"#\n\rReloadRequest\x12\x12\n\nauth_token\x18\x01 \x01(\t\"-\n\x0eReloadResponse\x12\n\n\x02ok\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"\x1e\n\x0bPingRequest\x12\x0f\n\x07message\x18\x01 \x01(\t\"2\n\x0cPongResponse\x12\x0f\n\x07message\x18\x01 \x01(\t\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\x32\xa5\x02\n\x08\x43hiAgent\x12:\n\x07\x45xecute\x12\x15.chibu.ExecuteRequest\x1a\x16.chibu.ExecuteResponse0\x01\x12\x32\n\x07GetInfo\x12\x12.chibu.InfoRequest\x1a\x13.chibu.InfoResponse\x12\x41\n\nListSkills\x12\x18.chibu.ListSkillsRequest\x1a\x19.chibu.ListSkillsResponse\x12\x35\n\x06Reload\x12\x14.chibu.ReloadRequest\x1a\x15.chibu.ReloadResponse\x12/\n\x04Ping\x12\x12.chibu.PingRequest\x1a\x13.chibu.PongResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'chibu_agent_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_EXECUTEREQUEST_CONTEXTENTRY']._loaded_options = None
-  _globals['_EXECUTEREQUEST_CONTEXTENTRY']._serialized_options = b'8\001'
   _globals['_EXECUTEREQUEST']._serialized_start=29
-  _globals['_EXECUTEREQUEST']._serialized_end=220
-  _globals['_EXECUTEREQUEST_CONTEXTENTRY']._serialized_start=174
-  _globals['_EXECUTEREQUEST_CONTEXTENTRY']._serialized_end=220
-  _globals['_EXECUTERESPONSE']._serialized_start=223
-  _globals['_EXECUTERESPONSE']._serialized_end=352
-  _globals['_INFOREQUEST']._serialized_start=354
-  _globals['_INFOREQUEST']._serialized_end=387
-  _globals['_INFORESPONSE']._serialized_start=390
-  _globals['_INFORESPONSE']._serialized_end=541
-  _globals['_LISTSKILLSREQUEST']._serialized_start=543
-  _globals['_LISTSKILLSREQUEST']._serialized_end=582
-  _globals['_SKILLINFO']._serialized_start=584
-  _globals['_SKILLINFO']._serialized_end=667
-  _globals['_LISTSKILLSRESPONSE']._serialized_start=669
-  _globals['_LISTSKILLSRESPONSE']._serialized_end=723
-  _globals['_PINGREQUEST']._serialized_start=725
-  _globals['_PINGREQUEST']._serialized_end=755
-  _globals['_PONGRESPONSE']._serialized_start=757
-  _globals['_PONGRESPONSE']._serialized_end=807
-  _globals['_CHIAGENT']._serialized_start=810
-  _globals['_CHIAGENT']._serialized_end=1048
+  _globals['_EXECUTEREQUEST']._serialized_end=200
+  _globals['_EXECUTERESPONSE']._serialized_start=203
+  _globals['_EXECUTERESPONSE']._serialized_end=332
+  _globals['_INFOREQUEST']._serialized_start=334
+  _globals['_INFOREQUEST']._serialized_end=367
+  _globals['_INFORESPONSE']._serialized_start=369
+  _globals['_INFORESPONSE']._serialized_end=495
+  _globals['_LISTSKILLSREQUEST']._serialized_start=497
+  _globals['_LISTSKILLSREQUEST']._serialized_end=536
+  _globals['_SKILLINFO']._serialized_start=538
+  _globals['_SKILLINFO']._serialized_end=601
+  _globals['_LISTSKILLSRESPONSE']._serialized_start=603
+  _globals['_LISTSKILLSRESPONSE']._serialized_end=657
+  _globals['_RELOADREQUEST']._serialized_start=659
+  _globals['_RELOADREQUEST']._serialized_end=694
+  _globals['_RELOADRESPONSE']._serialized_start=696
+  _globals['_RELOADRESPONSE']._serialized_end=741
+  _globals['_PINGREQUEST']._serialized_start=743
+  _globals['_PINGREQUEST']._serialized_end=773
+  _globals['_PONGRESPONSE']._serialized_start=775
+  _globals['_PONGRESPONSE']._serialized_end=825
+  _globals['_CHIAGENT']._serialized_start=828
+  _globals['_CHIAGENT']._serialized_end=1121
 # @@protoc_insertion_point(module_scope)

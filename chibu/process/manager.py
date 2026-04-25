@@ -1,11 +1,8 @@
-"""AgentProcessManager — starts and stops Pi agent subprocesses.
+"""AgentProcessManager — starts and stops Pi agent gRPC server subprocesses.
 
-Each agent gets its own OS process running chibu.grpc_server.server.
-Strategy: subprocess isolation for crash safety, gRPC port binding, and
-clean SIGTERM lifecycle.
-
-A JSON registry snapshot is written before each start so the subprocess
-can read agent metadata without a database connection.
+Each agent subprocess runs chibu.grpc_server.server, which in turn spawns
+`pi --mode rpc`.  This manager only knows about the gRPC server process;
+the pi subprocess lifetime is handled inside the server.
 """
 
 from __future__ import annotations
@@ -17,95 +14,130 @@ import os
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("chibu.process.manager")
 
 _READY_POLL_INTERVAL = 0.5
-_READY_TIMEOUT = 20.0
+_READY_TIMEOUT = 30.0
 _STOP_GRACE = 5.0
+
+
+def _pid_alive(pid: int) -> bool:
+    """Return True if the OS process with *pid* is still running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
 
 
 class AgentProcessManager:
     def __init__(self, agents_dir: Path, registry_snapshot_path: Path) -> None:
         self.agents_dir = agents_dir
         self.registry_snapshot = registry_snapshot_path
-        # agent_id → asyncio.subprocess.Process
         self._procs: dict[str, asyncio.subprocess.Process] = {}
+        self._log_fhs: dict[str, Any] = {}
+        # PIDs of agents that were running before our last restart (orphan tracking)
+        self._orphan_pids: dict[str, int] = {}
 
     # ── start ─────────────────────────────────────────────────────────────────
 
     async def start(self, agent_record: dict) -> int:
-        """Spawn the agent subprocess; returns the PID."""
         agent_id = agent_record["agent_id"]
         port = agent_record["grpc_port"]
 
-        log_path = Path(agent_record["root_path"]) / "agent.log"
+        log_path = Path(agent_record["workspace_path"]) / "agent.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_fh = open(log_path, "a")  # noqa: SIM115  — must stay open
+        log_fh = open(log_path, "a")  # noqa: SIM115
+        self._log_fhs[agent_id] = log_fh
 
         cmd = [
-            sys.executable,
-            "-m",
-            "chibu.grpc_server.server",
-            "--agent-id",
-            agent_id,
-            "--port",
-            str(port),
-            "--agents-dir",
-            str(self.agents_dir),
-            "--registry",
-            str(self.registry_snapshot),
+            sys.executable, "-m", "chibu.grpc_server.server",
+            "--agent-id", agent_id,
+            "--port", str(port),
+            "--agents-dir", str(self.agents_dir),
+            "--registry", str(self.registry_snapshot),
         ]
-
-        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=log_fh,
             stderr=asyncio.subprocess.STDOUT,
-            env=env,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
         self._procs[agent_id] = proc
-        logger.info(
-            "Spawned agent %s pid=%d port=%d", agent_record["name"], proc.pid, port
-        )
+        logger.info("Spawned agent %s pid=%d port=%d", agent_record["name"], proc.pid, port)
 
-        asyncio.create_task(
-            self._wait_ready(agent_id, port, proc),
-            name=f"ready-{agent_id}",
-        )
+        ready = await self._wait_ready(agent_id, port, proc)
+        if not ready:
+            logger.warning("Agent %s failed readiness check", agent_id)
 
         return proc.pid
+
+    # ── recovery after control-plane restart ─────────────────────────────────
+
+    async def recover_running_agents(self, agents: list[dict]) -> list[str]:
+        """Reconcile in-memory state with DB after a control-plane restart.
+
+        Agents the DB thinks are "running" either still have a live PID
+        (orphan — we track it so is_running/stop work) or are actually dead
+        (stale — caller should reset their DB status to "stopped").
+
+        Returns the list of agent_ids that are stale.
+        """
+        stale: list[str] = []
+        for rec in agents:
+            agent_id = rec.get("agent_id", "")
+            pid = rec.get("pid")
+            if not pid:
+                stale.append(agent_id)
+                continue
+            if _pid_alive(pid):
+                self._orphan_pids[agent_id] = pid
+                logger.info("Recovered orphan agent %s (pid=%d)", agent_id, pid)
+            else:
+                stale.append(agent_id)
+                logger.info(
+                    "Marking stale agent %s as stopped (pid=%d dead)", agent_id, pid
+                )
+        return stale
 
     # ── stop ──────────────────────────────────────────────────────────────────
 
     async def stop(self, agent_id: str, pid: int | None = None) -> None:
-        proc = self._procs.get(agent_id)
+        fh = self._log_fhs.pop(agent_id, None)
+        proc = self._procs.pop(agent_id, None)
+        orphan_pid = self._orphan_pids.pop(agent_id, None)
 
         if proc is not None:
-            await self._terminate_proc(proc)
-            self._procs.pop(agent_id, None)
+            await self._terminate(proc)
+            if fh is not None:
+                fh.close()
             return
 
-        # Fall back to pid if we don't hold the proc handle (e.g. after restart)
-        if pid:
+        if fh is not None:
+            fh.close()
+
+        # Fall back to any known PID (orphan or caller-supplied)
+        effective_pid = orphan_pid or pid
+        if effective_pid:
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.kill(effective_pid, signal.SIGTERM)
                 await asyncio.sleep(_STOP_GRACE)
                 try:
-                    os.kill(pid, signal.SIGKILL)
+                    os.kill(effective_pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
             except ProcessLookupError:
                 pass
 
-    # ── readiness poll ────────────────────────────────────────────────────────
+    # ── readiness ─────────────────────────────────────────────────────────────
 
     async def _wait_ready(
         self, agent_id: str, port: int, proc: asyncio.subprocess.Process
     ) -> bool:
-        """Poll gRPC Ping until the agent is up or the timeout expires."""
         from chibu.grpc_server.client import ChibuClient
 
         deadline = asyncio.get_event_loop().time() + _READY_TIMEOUT
@@ -116,18 +148,18 @@ class AgentProcessManager:
             try:
                 async with ChibuClient("127.0.0.1", port, "") as c:
                     if await c.ping():
-                        logger.info("Agent %s is ready on port %d", agent_id, port)
+                        logger.info("Agent %s ready on port %d", agent_id, port)
                         return True
             except Exception:
                 pass
             await asyncio.sleep(_READY_POLL_INTERVAL)
 
-        logger.warning("Agent %s readiness timeout after %.0fs", agent_id, _READY_TIMEOUT)
+        logger.warning("Agent %s readiness timeout", agent_id)
         return False
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    async def _terminate_proc(self, proc: asyncio.subprocess.Process) -> None:
+    async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
         try:
             proc.terminate()
             await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE)
@@ -136,12 +168,18 @@ class AgentProcessManager:
             await proc.wait()
 
     def write_registry_snapshot(self, agents: list[dict]) -> None:
-        """Serialize the registry to JSON so subprocesses can read it."""
         self.registry_snapshot.parent.mkdir(parents=True, exist_ok=True)
-        self.registry_snapshot.write_text(
-            json.dumps({"agents": agents}, indent=2)
-        )
+        tmp = self.registry_snapshot.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"agents": agents}, indent=2))
+        tmp.replace(self.registry_snapshot)  # atomic on POSIX
 
     def is_running(self, agent_id: str) -> bool:
         proc = self._procs.get(agent_id)
-        return proc is not None and proc.returncode is None
+        if proc is not None and proc.returncode is None:
+            return True
+        pid = self._orphan_pids.get(agent_id)
+        if pid:
+            if _pid_alive(pid):
+                return True
+            self._orphan_pids.pop(agent_id, None)
+        return False

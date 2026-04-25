@@ -1,276 +1,477 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chibu — Control Plane</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            surface: { DEFAULT: '#0d1117', 1: '#161b22', 2: '#21262d', 3: '#30363d' },
-            accent:  { DEFAULT: '#7c3aed', light: '#a78bfa', glow: '#7c3aed33' },
-            emerald: { glow: '#10b98133' },
-            rose:    { glow: '#f4364133' },
-          },
-          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'monospace'] },
-          boxShadow: {
-            'glow-accent': '0 0 20px 2px #7c3aed33',
-            'glow-emerald': '0 0 16px 2px #10b98133',
-            'glow-rose': '0 0 16px 2px #f4364133',
-          },
-        }
-      }
-    }
-  </script>
+  <title>Chibu</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
-    * { box-sizing: border-box; }
-    body { background: #0d1117; color: #e6edf3; font-family: 'JetBrains Mono', monospace; }
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
-    ::-webkit-scrollbar-track { background: #161b22; }
-    ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
-    .gradient-border { background: linear-gradient(135deg, #7c3aed22, #0d1117, #7c3aed11); border: 1px solid #7c3aed44; }
-    .status-pill-running  { background: #10b98122; color: #34d399; border: 1px solid #10b98144; }
-    .status-pill-stopped  { background: #6b728022; color: #9ca3af; border: 1px solid #6b728044; }
-    .status-pill-starting { background: #f59e0b22; color: #fbbf24; border: 1px solid #f59e0b44; }
-    .status-pill-error    { background: #f4364122; color: #fb7185; border: 1px solid #f4364144; }
-    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
-    @keyframes pulse-dot { 0%,100%{opacity:1;} 50%{opacity:.4;} }
-    .fade-in { animation: fadeIn .3s ease; }
-    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-    .glow-hover { transition: box-shadow .2s, border-color .2s; }
-    .glow-hover:hover { box-shadow: 0 0 20px 2px #7c3aed33; border-color: #7c3aed88 !important; }
-    .modal-backdrop { backdrop-filter: blur(6px); background: #0d111799; }
-    input, select { background: #161b22; border: 1px solid #30363d; color: #e6edf3; }
-    input:focus, select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 2px #7c3aed33; }
-    .sidebar-link.active { background: #7c3aed22; border-left: 2px solid #7c3aed; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #faf9f6;
+      --surface:   #ffffff;
+      --border:    #e8e5e0;
+      --border-2:  #d4d0c8;
+      --text:      #1a1a1a;
+      --text-2:    #6b6b6b;
+      --text-3:    #9b9b9b;
+      --accent:    #d97757;
+      --accent-bg: #fff4f0;
+      --green:     #2e7d32;
+      --green-bg:  #f1f8f1;
+      --red:       #c62828;
+      --red-bg:    #fdf1f1;
+      --amber:     #b45309;
+      --amber-bg:  #fffbeb;
+      --mono:      'JetBrains Mono', monospace;
+      --sans:      'Inter', -apple-system, sans-serif;
+      --radius:    8px;
+      --shadow:    0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    }
+
+    html, body { height: 100%; }
+    body { font-family: var(--sans); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+
+    /* ── scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+    /* ── layout ── */
+    .layout { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── sidebar ── */
+    .sidebar {
+      width: 220px; min-width: 220px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .logo {
+      width: 28px; height: 28px; border-radius: 7px;
+      background: var(--accent); color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 600; flex-shrink: 0;
+    }
+    .logo-text { font-size: 15px; font-weight: 600; letter-spacing: -.3px; }
+    .sidebar-section { padding: 12px 8px 4px; }
+    .sidebar-label {
+      font-size: 10px; font-weight: 600; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-3);
+      padding: 0 8px; margin-bottom: 4px;
+    }
+    .sidebar-link {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px; border-radius: 6px;
+      font-size: 13px; color: var(--text-2);
+      cursor: pointer; text-decoration: none;
+      transition: background .12s, color .12s;
+      user-select: none;
+    }
+    .sidebar-link:hover { background: var(--bg); color: var(--text); }
+    .sidebar-link.active { background: var(--accent-bg); color: var(--accent); font-weight: 500; }
+    .sidebar-link .count {
+      margin-left: auto; font-size: 11px; color: var(--text-3);
+      background: var(--bg); padding: 1px 6px; border-radius: 10px;
+    }
+    .sidebar-link.active .count { background: #fde8df; color: var(--accent); }
+    .sidebar-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      flex-shrink: 0; background: var(--border-2);
+    }
+    .sidebar-dot.running { background: var(--green); }
+    .sidebar-footer {
+      margin-top: auto; padding: 12px 8px;
+      border-top: 1px solid var(--border);
+    }
+    .add-btn {
+      width: 100%; padding: 7px 10px;
+      background: none; border: 1px dashed var(--border-2);
+      border-radius: 6px; color: var(--text-3);
+      font-size: 12px; font-family: var(--sans);
+      cursor: pointer; transition: border-color .12s, color .12s;
+    }
+    .add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── main ── */
+    .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+    .topbar {
+      height: 52px; min-height: 52px;
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--surface);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+    .breadcrumb .sep { color: var(--border-2); }
+    .breadcrumb .current { color: var(--text); font-weight: 500; }
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+    .status-chip {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 12px; padding: 4px 10px;
+      border-radius: 20px; border: 1px solid;
+    }
+    .status-chip.running { color: var(--green); border-color: #c8e6c9; background: var(--green-bg); }
+    .status-chip.stopped { color: var(--text-3); border-color: var(--border); background: var(--bg); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .dot.running { background: var(--green); }
+    .dot.stopped { background: var(--text-3); }
+    .dot.pulse { animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    /* ── content ── */
+    .content { padding: 28px 32px; max-width: 960px; }
+
+    /* ── stat cards ── */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 20px;
+    }
+    .stat-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin-bottom: 6px; }
+    .stat-value { font-size: 26px; font-weight: 600; letter-spacing: -.5px; }
+    .stat-card.accent-card .stat-value { color: var(--accent); }
+
+    /* ── agents grid ── */
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .section-title { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+    .search-input {
+      padding: 6px 12px; border: 1px solid var(--border);
+      border-radius: 20px; font-size: 12px; font-family: var(--sans);
+      background: var(--bg); color: var(--text); outline: none;
+      width: 180px; transition: border-color .12s;
+    }
+    .search-input:focus { border-color: var(--accent); }
+
+    .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .agent-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 20px;
+      transition: border-color .15s, box-shadow .15s;
+      cursor: default;
+    }
+    .agent-card:hover { border-color: var(--border-2); box-shadow: var(--shadow); }
+    .agent-card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+    .agent-name { font-size: 14px; font-weight: 600; }
+    .agent-chiboo { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+    .agent-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .tag {
+      font-size: 11px; font-family: var(--mono);
+      background: var(--bg); border: 1px solid var(--border);
+      padding: 2px 7px; border-radius: 4px; color: var(--text-2);
+    }
+    .agent-actions { display: flex; gap: 8px; }
+    .btn {
+      flex: 1; padding: 7px 12px; border-radius: 6px;
+      font-size: 12px; font-family: var(--sans); font-weight: 500;
+      cursor: pointer; border: 1px solid; transition: background .12s;
+      text-align: center; text-decoration: none; display: block;
+    }
+    .btn-ghost { background: var(--bg); border-color: var(--border); color: var(--text-2); }
+    .btn-ghost:hover { background: var(--border); color: var(--text); }
+    .btn-start { background: var(--green-bg); border-color: #c8e6c9; color: var(--green); }
+    .btn-start:hover { background: #dcedc8; }
+    .btn-stop { background: var(--red-bg); border-color: #ffcdd2; color: var(--red); }
+    .btn-stop:hover { background: #ffcdd2; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+    .btn-primary:hover { background: #c4674a; }
+
+    /* ── empty state ── */
+    .empty { padding: 64px 0; text-align: center; color: var(--text-3); }
+    .empty p { margin-top: 8px; font-size: 13px; }
+
+    /* ── modal ── */
+    .modal-backdrop {
+      display: none; position: fixed; inset: 0; z-index: 50;
+      background: rgba(0,0,0,.25); backdrop-filter: blur(4px);
+      align-items: center; justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 28px 28px 24px;
+      width: 420px; max-width: calc(100vw - 32px);
+      box-shadow: 0 8px 32px rgba(0,0,0,.12);
+    }
+    .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 20px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin-bottom: 6px; }
+    .field input, .field select {
+      width: 100%; padding: 8px 12px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; font-family: var(--sans);
+      background: var(--bg); color: var(--text); outline: none;
+      transition: border-color .12s;
+    }
+    .field input:focus, .field select:focus { border-color: var(--accent); }
+    .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .btn-cancel { flex: 1; padding: 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text-2); font-size: 13px; font-family: var(--sans); cursor: pointer; }
+    .btn-cancel:hover { background: var(--border); }
+    .btn-submit { flex: 1; padding: 9px; border-radius: 6px; border: none; background: var(--accent); color: white; font-size: 13px; font-family: var(--sans); font-weight: 500; cursor: pointer; }
+    .btn-submit:hover { background: #c4674a; }
+
+    /* ── toast ── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 100;
+      padding: 12px 18px; border-radius: var(--radius);
+      font-size: 13px; font-weight: 500;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      opacity: 0; transform: translateY(8px);
+      transition: opacity .2s, transform .2s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { background: var(--green-bg); color: var(--green); border: 1px solid #c8e6c9; }
+    .toast.error { background: var(--red-bg); color: var(--red); border: 1px solid #ffcdd2; }
+    .toast.info { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
   </style>
 </head>
-<body class="min-h-screen flex flex-col">
+<body>
 
-<!-- ── Top Nav ────────────────────────────────────────────────────────────── -->
-<header class="border-b border-surface-3 bg-surface-1 px-6 py-3 flex items-center justify-between sticky top-0 z-30">
-  <div class="flex items-center gap-3">
-    <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center shadow-glow-accent">
-      <span class="text-white text-xs font-bold">χ</span>
-    </div>
-    <span class="text-sm font-bold tracking-widest text-accent-light uppercase">chibu</span>
-    <span class="text-xs text-surface-3 ml-1">control plane</span>
-  </div>
-  <div class="flex items-center gap-4">
-    <div id="summary-pills" class="flex gap-3 text-xs">
-      <span class="px-2 py-1 rounded-md status-pill-running" id="pill-running">
-        <span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>
-        <span id="running-count">{{ summary.running_agents }}</span> running
-      </span>
-      <span class="px-2 py-1 rounded-md status-pill-stopped">
-        <span id="stopped-count">{{ summary.stopped_agents }}</span> stopped
-      </span>
-    </div>
-    <button onclick="openCreateModal()" class="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:bg-violet-500 transition-colors shadow-glow-accent">
-      + New Agent
-    </button>
-  </div>
-</header>
+<div class="layout">
 
-<!-- ── Layout ─────────────────────────────────────────────────────────────── -->
-<div class="flex flex-1 overflow-hidden">
-
-  <!-- Sidebar -->
-  <aside class="w-56 border-r border-surface-3 bg-surface-1 flex flex-col py-4 shrink-0 overflow-y-auto">
-    <div class="px-4 mb-3">
-      <p class="text-[10px] uppercase tracking-widest text-surface-3 font-bold mb-2">Agent Groups</p>
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">χ</div>
+      <span class="logo-text">chibu</span>
     </div>
 
-    <nav class="flex flex-col gap-0.5 px-2">
-      <a href="/" class="sidebar-link active text-xs px-3 py-2 rounded-md flex items-center gap-2 cursor-pointer hover:bg-surface-2 transition-colors" id="link-all">
-        <span class="text-accent-light">⊞</span> All Agents
-        <span class="ml-auto text-[10px] bg-surface-3 px-1.5 py-0.5 rounded">{{ summary.total_agents }}</span>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Chiboos</div>
+      <a href="/" class="sidebar-link active" id="link-all">
+        All agents
+        <span class="count">{{ summary.total_agents }}</span>
       </a>
       {% for group in groups %}
-      <a href="/?group={{ group.id }}" class="sidebar-link text-xs px-3 py-2 rounded-md flex items-center gap-2 cursor-pointer hover:bg-surface-2 transition-colors">
-        <span class="text-violet-400">◈</span>
-        <span class="truncate">{{ group.name }}</span>
-        <span class="ml-auto text-[10px] bg-surface-3 px-1.5 py-0.5 rounded">{{ group.agent_count }}</span>
+      <a href="/?chiboo={{ group.name }}" class="sidebar-link" id="link-{{ group.id }}">
+        <span class="sidebar-dot {% if group.agent_count > 0 %}running{% endif %}"></span>
+        {{ group.name }}
+        <span class="count">{{ group.agent_count }}</span>
       </a>
       {% endfor %}
-    </nav>
+    </div>
 
-    <div class="mt-auto px-4 pt-4 border-t border-surface-3 mt-4">
-      <p class="text-[10px] uppercase tracking-widest text-surface-3 font-bold mb-2">Quick Links</p>
-      <a href="/api/docs" target="_blank" class="text-xs text-surface-3 hover:text-accent-light flex items-center gap-1.5 py-1">
-        <span>⟡</span> API Docs
-      </a>
+    <div class="sidebar-footer">
+      <button class="add-btn" onclick="openModal('chiboo')">+ New chiboo</button>
     </div>
   </aside>
 
-  <!-- Main content -->
-  <main class="flex-1 overflow-y-auto">
-    <div class="p-6 max-w-none">
+  <!-- ── Main ── -->
+  <div class="main">
 
-      <!-- Summary cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {% set cards = [
-          ("Total Agents", summary.total_agents, "◈", "text-accent-light"),
-          ("Running",       summary.running_agents, "▶", "text-emerald-400"),
-          ("Stopped",       summary.stopped_agents, "◼", "text-gray-400"),
-          ("Groups",        summary.total_groups,   "⊞", "text-violet-300"),
-        ] %}
-        {% for label, val, icon, color in cards %}
-        <div class="gradient-border rounded-xl p-4 glow-hover fade-in">
-          <div class="flex items-start justify-between">
-            <div>
-              <p class="text-[10px] uppercase tracking-widest text-surface-3 mb-1">{{ label }}</p>
-              <p class="text-2xl font-bold text-white">{{ val }}</p>
-            </div>
-            <span class="text-xl {{ color }}">{{ icon }}</span>
-          </div>
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span class="current" id="breadcrumb-text">All agents</span>
+      </div>
+      <div class="topbar-right">
+        <div class="status-chip running" id="running-chip">
+          <div class="dot running pulse"></div>
+          <span id="running-count">{{ summary.running_agents }}</span> running
         </div>
-        {% endfor %}
+        <button class="btn btn-primary" style="flex:none;padding:7px 16px;font-size:13px;" onclick="openModal('agent')">+ New agent</button>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+
+      <!-- Stats -->
+      <div class="stats">
+        <div class="stat-card">
+          <div class="stat-label">Total agents</div>
+          <div class="stat-value" id="stat-total">{{ summary.total_agents }}</div>
+        </div>
+        <div class="stat-card accent-card">
+          <div class="stat-label">Running</div>
+          <div class="stat-value" id="stat-running">{{ summary.running_agents }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Stopped</div>
+          <div class="stat-value" id="stat-stopped">{{ summary.stopped_agents }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Chiboos</div>
+          <div class="stat-value" id="stat-chiboos">{{ summary.total_chiboos }}</div>
+        </div>
       </div>
 
-      <!-- Charts row -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div class="lg:col-span-2 gradient-border rounded-xl p-4">
-          <p class="text-xs text-surface-3 uppercase tracking-widest mb-3">LLM Requests (24h)</p>
-          <canvas id="chart-llm" height="110"></canvas>
-        </div>
-        <div class="gradient-border rounded-xl p-4">
-          <p class="text-xs text-surface-3 uppercase tracking-widest mb-3">Agent Status</p>
-          <canvas id="chart-status" height="110"></canvas>
-        </div>
+      <!-- Agents -->
+      <div class="section-header">
+        <span class="section-title">Agents</span>
+        <input class="search-input" id="search" placeholder="Search…" oninput="filterAgents()" />
       </div>
 
-      <!-- Agents grid -->
-      <div class="mb-3 flex items-center justify-between">
-        <p class="text-[10px] uppercase tracking-widest text-surface-3 font-bold">Agents</p>
-        <input id="agent-search" onkeyup="filterAgents()" placeholder="Search agents…"
-               class="text-xs px-3 py-1.5 rounded-md w-48" />
-      </div>
-
-      <div id="agents-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div class="agents-grid" id="agents-grid">
         {% for agent in agents %}
-        <div class="agent-card gradient-border rounded-xl p-4 glow-hover fade-in" data-name="{{ agent.name|lower }}" data-group="{{ agent.group.name|lower if agent.group else '' }}">
-          <div class="flex items-start justify-between mb-3">
+        <div class="agent-card" data-name="{{ agent.name|lower }}" data-chiboo="{{ agent.group.name|lower if agent.group else '' }}" data-id="{{ agent.agent_id }}">
+          <div class="agent-card-top">
             <div>
-              <p class="font-bold text-sm text-white">{{ agent.name }}</p>
-              <p class="text-[10px] text-surface-3 mt-0.5">{{ agent.group.name if agent.group else '—' }}</p>
+              <div class="agent-name">{{ agent.name }}</div>
+              <div class="agent-chiboo">{{ agent.group.name if agent.group else '—' }}</div>
             </div>
-            <span class="status-pill-{{ agent.status }} text-[10px] px-2 py-0.5 rounded-full">
-              {% if agent.status == 'running' %}<span class="pulse-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1"></span>{% endif %}
+            <div class="status-chip {{ agent.status }}" style="font-size:11px;padding:3px 9px;">
+              <div class="dot {{ agent.status }}{% if agent.status == 'running' %} pulse{% endif %}"></div>
               {{ agent.status }}
-            </span>
+            </div>
           </div>
-
-          <div class="flex items-center gap-2 text-[10px] text-surface-3 mb-3">
-            <span class="font-mono bg-surface-2 px-1.5 py-0.5 rounded">gRPC :{{ agent.grpc_port }}</span>
-            <span class="font-mono bg-surface-2 px-1.5 py-0.5 rounded truncate max-w-[120px]" title="{{ agent.auth_token }}">
-              {{ agent.auth_token[:8] }}•••
-            </span>
-            <button onclick="copyToken('{{ agent.auth_token }}')" class="ml-auto text-accent-light hover:text-accent transition-colors">⎘</button>
+          <div class="agent-meta">
+            <span class="tag">:{{ agent.grpc_port }}</span>
+            <span class="tag" title="{{ agent.auth_token }}">{{ agent.auth_token[:8] }}…</span>
           </div>
-
-          <div class="flex gap-2">
-            <a href="/agents/{{ agent.agent_id }}" class="flex-1 text-center text-[10px] py-1.5 rounded-md bg-surface-2 hover:bg-surface-3 transition-colors">Details</a>
+          <div class="agent-actions">
+            <a class="btn btn-ghost" href="/agents/{{ agent.agent_id }}">Open</a>
             {% if agent.status == 'running' %}
-            <button onclick="stopAgent('{{ agent.agent_id }}', this)" class="flex-1 text-[10px] py-1.5 rounded-md bg-rose-900/30 text-rose-400 hover:bg-rose-900/50 transition-colors border border-rose-900/50">Stop</button>
+            <button class="btn btn-stop" onclick="stopAgent('{{ agent.agent_id }}', this)">Stop</button>
             {% else %}
-            <button onclick="startAgent('{{ agent.agent_id }}', this)" class="flex-1 text-[10px] py-1.5 rounded-md bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 transition-colors border border-emerald-900/50">Start</button>
+            <button class="btn btn-start" onclick="startAgent('{{ agent.agent_id }}', this)">Start</button>
             {% endif %}
           </div>
         </div>
         {% else %}
-        <div class="col-span-3 text-center py-16 text-surface-3">
-          <p class="text-2xl mb-2">◈</p>
-          <p class="text-sm">No agents yet.</p>
-          <button onclick="openCreateModal()" class="mt-3 text-xs text-accent-light hover:underline">Create your first agent →</button>
+        <div class="empty" style="grid-column:1/-1">
+          <div style="font-size:28px;opacity:.3">◈</div>
+          <p>No agents yet. <button onclick="openModal('agent')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;">Create one →</button></p>
         </div>
         {% endfor %}
       </div>
 
     </div>
-  </main>
+  </div>
 </div>
 
-<!-- ── Create Agent Modal ─────────────────────────────────────────────────── -->
-<div id="create-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop" onclick="closeCreateModal(event)">
-  <div class="gradient-border rounded-2xl p-6 w-full max-w-md mx-4 shadow-glow-accent" onclick="event.stopPropagation()">
-    <div class="flex items-center justify-between mb-5">
-      <h2 class="text-sm font-bold text-white">Create Pi Agent</h2>
-      <button onclick="closeCreateModal()" class="text-surface-3 hover:text-white text-lg">✕</button>
-    </div>
-    <form id="create-form" onsubmit="submitCreate(event)">
-      <div class="mb-4">
-        <label class="block text-[10px] uppercase tracking-widest text-surface-3 mb-1.5">Agent Name</label>
-        <input name="name" required class="w-full text-sm px-3 py-2 rounded-lg" placeholder="my-pi-agent" />
+<!-- ── Create chiboo modal ── -->
+<div class="modal-backdrop" id="modal-chiboo" onclick="closeModal('chiboo', event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">New chiboo</div>
+    <form onsubmit="submitChiboo(event)">
+      <div class="field">
+        <label>Name</label>
+        <input id="chiboo-name" required placeholder="research" autocomplete="off" />
       </div>
-      <div class="mb-4">
-        <label class="block text-[10px] uppercase tracking-widest text-surface-3 mb-1.5">Agent Group</label>
-        <input name="agent_group" required class="w-full text-sm px-3 py-2 rounded-lg" placeholder="badmono org" value="badmono org" />
+      <div class="field">
+        <label>Description <span style="text-transform:none;font-weight:400">(optional)</span></label>
+        <input id="chiboo-desc" placeholder="What this chiboo does" />
       </div>
-      <div class="mb-5">
-        <label class="block text-[10px] uppercase tracking-widest text-surface-3 mb-1.5">gRPC Port <span class="text-surface-3 normal-case">(leave blank to auto-assign)</span></label>
-        <input name="grpc_port" type="number" class="w-full text-sm px-3 py-2 rounded-lg" placeholder="auto" />
-      </div>
-      <div class="flex gap-3">
-        <button type="button" onclick="closeCreateModal()" class="flex-1 py-2 rounded-lg bg-surface-2 text-xs hover:bg-surface-3 transition-colors">Cancel</button>
-        <button type="submit" id="create-btn" class="flex-1 py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-violet-500 transition-colors">Create Agent</button>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" onclick="closeModal('chiboo')">Cancel</button>
+        <button type="submit" class="btn-submit">Create chiboo</button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
-<div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-xs font-medium shadow-lg border fade-in"></div>
+<!-- ── Create agent modal ── -->
+<div class="modal-backdrop" id="modal-agent" onclick="closeModal('agent', event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">New agent</div>
+    <form onsubmit="submitAgent(event)">
+      <div class="field">
+        <label>Agent name</label>
+        <input id="agent-name" required placeholder="coder-1" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>Chiboo</label>
+        <select id="agent-chiboo" required>
+          <option value="">Select a chiboo…</option>
+          {% for group in groups %}
+          <option value="{{ group.name }}">{{ group.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" onclick="closeModal('agent')">Cancel</button>
+        <button type="submit" class="btn-submit">Create agent</button>
+      </div>
+    </form>
+  </div>
+</div>
 
-<script src="/static/main.js"></script>
+<div class="toast" id="toast"></div>
+
 <script>
-  // ── Charts ─────────────────────────────────────────────────────────────────
-  fetch('/api/analytics').then(r => r.json()).then(data => {
-    const accent = '#7c3aed', emerald = '#10b981', rose = '#f43641';
+  function openModal(id) { document.getElementById('modal-' + id).classList.add('open'); }
+  function closeModal(id, e) {
+    if (e && e.target !== document.getElementById('modal-' + id)) return;
+    document.getElementById('modal-' + id).classList.remove('open');
+  }
 
-    // LLM requests chart
-    new Chart(document.getElementById('chart-llm'), {
-      type: 'line',
-      data: {
-        labels: data.llm_hourly.map(d => d.hour.slice(11, 16)),
-        datasets: [{
-          label: 'Requests',
-          data: data.llm_hourly.map(d => d.count),
-          borderColor: accent, backgroundColor: accent + '22',
-          borderWidth: 1.5, fill: true, tension: 0.4,
-          pointRadius: 2, pointHoverRadius: 4,
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { color: '#21262d' }, ticks: { color: '#6e7681', font: { size: 9 } } },
-          y: { grid: { color: '#21262d' }, ticks: { color: '#6e7681', font: { size: 9 } }, beginAtZero: true },
-        }
-      }
+  function filterAgents() {
+    const q = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.agent-card').forEach(c => {
+      const match = !q || c.dataset.name.includes(q) || c.dataset.chiboo.includes(q);
+      c.style.display = match ? '' : 'none';
     });
+  }
 
-    // Status doughnut
-    const sd = data.status_distribution;
-    const labels = Object.keys(sd), vals = Object.values(sd);
-    const colors = labels.map(l => l === 'running' ? emerald : l === 'error' ? rose : '#6b7280');
-    new Chart(document.getElementById('chart-status'), {
-      type: 'doughnut',
-      data: { labels, datasets: [{ data: vals, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false, cutout: '70%',
-        plugins: { legend: { position: 'bottom', labels: { color: '#9ca3af', font: { size: 9 }, boxWidth: 8 } } }
-      }
+  async function submitChiboo(e) {
+    e.preventDefault();
+    const r = await fetch('/chiboos/', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: document.getElementById('chiboo-name').value, description: document.getElementById('chiboo-desc').value })
     });
-  }).catch(() => {});
+    if (r.ok) { showToast('Chiboo created', 'success'); setTimeout(() => location.reload(), 600); }
+    else showToast((await r.json()).detail || 'Error', 'error');
+  }
+
+  async function submitAgent(e) {
+    e.preventDefault();
+    const r = await fetch('/agents/', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: document.getElementById('agent-name').value, chiboo: document.getElementById('agent-chiboo').value })
+    });
+    if (r.ok) { showToast('Agent created', 'success'); setTimeout(() => location.reload(), 600); }
+    else showToast((await r.json()).detail || 'Error', 'error');
+  }
+
+  async function startAgent(id, btn) {
+    btn.disabled = true; btn.textContent = '…';
+    const r = await fetch(`/agents/${id}/start`, { method: 'POST' });
+    if (r.ok) { showToast('Starting…', 'success'); setTimeout(() => location.reload(), 1800); }
+    else { showToast((await r.json()).detail || 'Error', 'error'); btn.disabled = false; btn.textContent = 'Start'; }
+  }
+
+  async function stopAgent(id, btn) {
+    btn.disabled = true; btn.textContent = '…';
+    const r = await fetch(`/agents/${id}/stop`, { method: 'POST' });
+    if (r.ok) { showToast('Stopped', 'info'); setTimeout(() => location.reload(), 600); }
+    else { showToast((await r.json()).detail || 'Error', 'error'); btn.disabled = false; btn.textContent = 'Stop'; }
+  }
+
+  let _toastTimer;
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = `toast show ${type}`;
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  // Highlight active chiboo link from URL
+  const params = new URLSearchParams(location.search);
+  const activeChiboo = params.get('chiboo');
+  if (activeChiboo) {
+    document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll('.sidebar-link').forEach(l => {
+      if (l.href && l.href.includes('chiboo=' + activeChiboo)) l.classList.add('active');
+    });
+    document.getElementById('breadcrumb-text').textContent = activeChiboo;
+    document.querySelectorAll('.agent-card').forEach(c => {
+      c.style.display = c.dataset.chiboo === activeChiboo.toLowerCase() ? '' : 'none';
+    });
+  }
 </script>
+
 </body>
 </html>

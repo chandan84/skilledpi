@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from chibu.grpc_server import chibu_agent_pb2 as chibu__agent__pb2
+import chibu_agent_pb2 as chibu__agent__pb2
 
 GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
@@ -26,7 +26,10 @@ if _version_not_supported:
 
 
 class ChiAgentStub(object):
-    """ChiAgent — gRPC service exposed by each Pi agent instance
+    """ChiAgent — gRPC service exposed by each pi agent instance.
+    Clients (and the control plane) connect here to submit tasks and receive
+    streaming events.  The underlying LLM work is delegated to a persistent
+    `pi --mode rpc` subprocess; no Anthropic SDK touches this process.
     """
 
     def __init__(self, channel):
@@ -50,6 +53,11 @@ class ChiAgentStub(object):
                 request_serializer=chibu__agent__pb2.ListSkillsRequest.SerializeToString,
                 response_deserializer=chibu__agent__pb2.ListSkillsResponse.FromString,
                 _registered_method=True)
+        self.Reload = channel.unary_unary(
+                '/chibu.ChiAgent/Reload',
+                request_serializer=chibu__agent__pb2.ReloadRequest.SerializeToString,
+                response_deserializer=chibu__agent__pb2.ReloadResponse.FromString,
+                _registered_method=True)
         self.Ping = channel.unary_unary(
                 '/chibu.ChiAgent/Ping',
                 request_serializer=chibu__agent__pb2.PingRequest.SerializeToString,
@@ -58,32 +66,43 @@ class ChiAgentStub(object):
 
 
 class ChiAgentServicer(object):
-    """ChiAgent — gRPC service exposed by each Pi agent instance
+    """ChiAgent — gRPC service exposed by each pi agent instance.
+    Clients (and the control plane) connect here to submit tasks and receive
+    streaming events.  The underlying LLM work is delegated to a persistent
+    `pi --mode rpc` subprocess; no Anthropic SDK touches this process.
     """
 
     def Execute(self, request, context):
-        """Execute an agent with a prompt, streaming back events
+        """Execute a prompt, streaming back pi RPC events as they arrive.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetInfo(self, request, context):
-        """Retrieve agent identity and capability metadata
+        """Agent identity / capability metadata.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ListSkills(self, request, context):
-        """List skills available on this agent
+        """List skills installed in the agent's .pi/skills/ directory.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Reload(self, request, context):
+        """Stop the pi subprocess, re-read .pi/ from disk, restart.
+        Call this after mutating skills, extensions, or packages.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Ping(self, request, context):
-        """Health check
+        """Health / readiness probe.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -107,6 +126,11 @@ def add_ChiAgentServicer_to_server(servicer, server):
                     request_deserializer=chibu__agent__pb2.ListSkillsRequest.FromString,
                     response_serializer=chibu__agent__pb2.ListSkillsResponse.SerializeToString,
             ),
+            'Reload': grpc.unary_unary_rpc_method_handler(
+                    servicer.Reload,
+                    request_deserializer=chibu__agent__pb2.ReloadRequest.FromString,
+                    response_serializer=chibu__agent__pb2.ReloadResponse.SerializeToString,
+            ),
             'Ping': grpc.unary_unary_rpc_method_handler(
                     servicer.Ping,
                     request_deserializer=chibu__agent__pb2.PingRequest.FromString,
@@ -121,7 +145,10 @@ def add_ChiAgentServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class ChiAgent(object):
-    """ChiAgent — gRPC service exposed by each Pi agent instance
+    """ChiAgent — gRPC service exposed by each pi agent instance.
+    Clients (and the control plane) connect here to submit tasks and receive
+    streaming events.  The underlying LLM work is delegated to a persistent
+    `pi --mode rpc` subprocess; no Anthropic SDK touches this process.
     """
 
     @staticmethod
@@ -195,6 +222,33 @@ class ChiAgent(object):
             '/chibu.ChiAgent/ListSkills',
             chibu__agent__pb2.ListSkillsRequest.SerializeToString,
             chibu__agent__pb2.ListSkillsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Reload(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/chibu.ChiAgent/Reload',
+            chibu__agent__pb2.ReloadRequest.SerializeToString,
+            chibu__agent__pb2.ReloadResponse.FromString,
             options,
             channel_credentials,
             insecure,
